@@ -49,11 +49,11 @@ python markdown2docx.py document.md -o ./docs
 
 ## Options
 
-| Option | Description |
-|---|---|
-| `FILES` | One or more Markdown files to convert (required) |
-| `-o`, `--output` | Output directory (default: `./output`) |
-| `--help` | Show help message |
+| Option           | Description                                      |
+| ---------------- | ------------------------------------------------ |
+| `FILES`          | One or more Markdown files to convert (required) |
+| `-o`, `--output` | Output directory (default: `./output`)           |
+| `--help`         | Show help message                                |
 
 ## Output
 
