@@ -39,7 +39,7 @@ CODE_FONT = "Courier New"
 CODE_FONT_SIZE = Pt(9)
 CODE_BG_COLOR = "F2F2F2"
 MAX_IMAGE_WIDTH = Inches(6)
-MAX_IMAGE_HEIGHT = Inches(9)
+MAX_IMAGE_HEIGHT = Inches(8)
 
 # Alert type -> (border_color, background_color, label_text, text_color)
 ALERT_STYLES = {
