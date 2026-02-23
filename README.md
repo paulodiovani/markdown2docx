@@ -12,6 +12,7 @@ Convert GitHub Flavored Markdown files to DOCX format.
 - Tables with header row and column alignment
 - Ordered, unordered, and task lists
 - Blockquotes with left border
+- GitHub-style alerts (NOTE, TIP, IMPORTANT, WARNING, CAUTION)
 - Horizontal rules
 - Mermaid diagrams (rendered to PNG via `mmdc`)
 
@@ -32,19 +33,19 @@ npm install -g @mermaid-js/mermaid-cli
 Convert a single file:
 
 ```bash
-python markdown2docx.py document.md
+./markdown2docx document.md
 ```
 
 Convert multiple files:
 
 ```bash
-python markdown2docx.py file1.md file2.md file3.md
+./markdown2docx file1.md file2.md file3.md
 ```
 
 Specify output directory:
 
 ```bash
-python markdown2docx.py document.md -o ./docs
+./markdown2docx document.md -o ./docs
 ```
 
 ## Options

@@ -13,17 +13,17 @@ Single-file CLI tool that converts GitHub Flavored Markdown to DOCX. Python 3.13
 .venv/bin/pip install -r requirements.txt
 
 # Run conversion
-.venv/bin/python markdown2docx.py <file.md> [-o output_dir]
+./markdown2docx <file.md> [-o output_dir]
 
 # Run with multiple files
-.venv/bin/python markdown2docx.py file1.md file2.md -o ./output
+./markdown2docx file1.md file2.md -o ./output
 ```
 
 No test suite or linter is configured.
 
 ## Architecture
 
-Everything lives in `markdown2docx.py`. The pipeline is:
+Everything lives in `markdown2docx` (executable, no `.py` extension). The pipeline is:
 
 1. **Parse**: mistune v3 in AST mode (`renderer="ast"`) with GFM plugins (table, strikethrough, task_lists) produces a list of token dicts
 2. **Preprocess**: `preprocess_mermaid()` scans for `block_code` tokens with lang `mermaid`, renders them to PNG via `mmdc`, replaces with image paragraph tokens
