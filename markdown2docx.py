@@ -11,6 +11,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.image.image import Image as DocxImage
 from docx.shared import Inches, Pt, RGBColor
 from pygments import lex
 from pygments.lexers import TextLexer, get_lexer_by_name
@@ -38,6 +39,7 @@ CODE_FONT = "Courier New"
 CODE_FONT_SIZE = Pt(9)
 CODE_BG_COLOR = "F2F2F2"
 MAX_IMAGE_WIDTH = Inches(6)
+MAX_IMAGE_HEIGHT = Inches(9)
 
 # Pygments token type -> (hex_color, bold, italic)
 TOKEN_STYLES = {
@@ -104,6 +106,20 @@ def resolve_image_path(url, base_dir):
     return Path(base_dir) / url
 
 
+def calculate_image_dimensions(img_path, max_width, max_height):
+    """Calculate width and height to fit within bounding box, preserving aspect ratio."""
+    image = DocxImage.from_file(str(img_path))
+    if image.px_width == 0 or image.px_height == 0:
+        return max_width, max_height
+    aspect_ratio = image.px_width / image.px_height
+    width = max_width
+    height = int(max_width / aspect_ratio)
+    if height > max_height:
+        height = max_height
+        width = int(max_height * aspect_ratio)
+    return width, height
+
+
 # ---------------------------------------------------------------------------
 # Side-effect functions (mutate doc or paragraph)
 # ---------------------------------------------------------------------------
@@ -154,12 +170,16 @@ def add_hyperlink(paragraph, url, text):
 
 
 def add_image(doc, url, base_dir):
-    """Resolve image path and add picture to document with max width."""
+    """Resolve image path and add picture to document, scaled to fit page."""
     img_path = resolve_image_path(url, base_dir)
     if not img_path.exists():
         doc.add_paragraph(f"[Image not found: {url}]")
         return
-    doc.add_picture(str(img_path), width=MAX_IMAGE_WIDTH)
+    try:
+        width, height = calculate_image_dimensions(img_path, MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT)
+        doc.add_picture(str(img_path), width=width, height=height)
+    except Exception:
+        doc.add_picture(str(img_path), width=MAX_IMAGE_WIDTH)
 
 
 # ---------------------------------------------------------------------------
