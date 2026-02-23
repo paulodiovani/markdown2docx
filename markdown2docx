@@ -605,7 +605,6 @@ def preprocess_mermaid(tokens, base_dir):
                 subprocess.run(
                     ["mmdc", "-i", str(mmd_path), "-o", str(png_path)],
                     check=True,
-                    capture_output=True,
                 )
 
                 # Replace with an image paragraph token
