@@ -41,6 +41,15 @@ CODE_BG_COLOR = "F2F2F2"
 MAX_IMAGE_WIDTH = Inches(6)
 MAX_IMAGE_HEIGHT = Inches(9)
 
+# Alert type -> (border_color, background_color, label_text, text_color)
+ALERT_STYLES = {
+    "NOTE": ("4493F8", "DBEAFE", "Note", "4493F8"),
+    "TIP": ("3FB950", "DCFCE7", "Tip", "3FB950"),
+    "IMPORTANT": ("AB7DF8", "F3E8FF", "Important", "AB7DF8"),
+    "WARNING": ("D29922", "FEF9C3", "Warning", "D29922"),
+    "CAUTION": ("F85149", "FEE2E2", "Caution", "F85149"),
+}
+
 # Pygments token type -> (hex_color, bold, italic)
 TOKEN_STYLES = {
     Comment: ("6A9955", False, True),
@@ -118,6 +127,44 @@ def calculate_image_dimensions(img_path, max_width, max_height):
         height = max_height
         width = int(max_height * aspect_ratio)
     return width, height
+
+
+def detect_alert_type(token):
+    """Check if a block_quote token is a GitHub-style alert.
+
+    Returns the alert type string (e.g. "NOTE") or None.
+    Mistune splits [!NOTE] into two text nodes: "[" and "!NOTE]".
+    """
+    children = token.get("children", [])
+    if not children:
+        return None
+
+    first_child = children[0]
+    if first_child.get("type") != "paragraph":
+        return None
+
+    inlines = first_child.get("children", [])
+    if len(inlines) < 2:
+        return None
+
+    first_inline = inlines[0]
+    second_inline = inlines[1]
+
+    if first_inline.get("type") != "text" or second_inline.get("type") != "text":
+        return None
+
+    first_raw = first_inline.get("raw", "") or first_inline.get("text", "")
+    second_raw = second_inline.get("raw", "") or second_inline.get("text", "")
+
+    if first_raw != "[":
+        return None
+
+    if second_raw.startswith("!") and second_raw.endswith("]"):
+        alert_type = second_raw[1:-1].upper()
+        if alert_type in ALERT_STYLES:
+            return alert_type
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +248,7 @@ def render_block(doc, token, base_dir):
         "paragraph": render_paragraph,
         "block_code": render_block_code,
         "block_quote": render_block_quote,
+        "alert": render_alert,
         "list": render_list,
         "table": render_table,
         "thematic_break": render_thematic_break,
@@ -294,6 +342,48 @@ def render_block_quote(doc, token, base_dir):
             p_pr.append(p_bdr)
 
             render_inline(para, child.get("children", []), base_dir)
+        else:
+            render_block(doc, child, base_dir)
+
+
+def render_alert(doc, token, base_dir):
+    """Render a GitHub-style alert as a colored box with label and body."""
+    alert_type = token.get("attrs", {}).get("alert_type", "NOTE")
+    border_color, bg_color, label_text, text_color = ALERT_STYLES[alert_type]
+    children = token.get("children", [])
+
+    def apply_alert_formatting(para):
+        """Apply colored left border, background shading, and indent to a paragraph."""
+        p_fmt = para.paragraph_format
+        p_fmt.left_indent = Inches(0.5)
+
+        set_paragraph_shading(para, bg_color)
+
+        p_pr = para._p.get_or_add_pPr()
+        p_bdr = OxmlElement("w:pBdr")
+        left_bdr = OxmlElement("w:left")
+        left_bdr.set(qn("w:val"), "single")
+        left_bdr.set(qn("w:sz"), "12")
+        left_bdr.set(qn("w:space"), "4")
+        left_bdr.set(qn("w:color"), border_color)
+        p_bdr.append(left_bdr)
+        p_pr.append(p_bdr)
+
+    # Label paragraph
+    label_para = doc.add_paragraph()
+    apply_alert_formatting(label_para)
+    run = label_para.add_run(label_text)
+    run.bold = True
+    run.font.color.rgb = RGBColor.from_string(text_color)
+
+    # Body paragraphs
+    for child in children:
+        if child["type"] == "paragraph":
+            para = doc.add_paragraph()
+            apply_alert_formatting(para)
+            render_inline(para, child.get("children", []), base_dir)
+        elif child["type"] == "blank_line":
+            continue
         else:
             render_block(doc, child, base_dir)
 
@@ -528,6 +618,55 @@ def preprocess_mermaid(tokens, base_dir):
     return result
 
 
+def preprocess_alerts(tokens):
+    """Scan AST for GitHub-style alerts in blockquotes and replace with alert tokens."""
+    result = []
+
+    for token in tokens:
+        if token["type"] == "block_quote":
+            alert_type = detect_alert_type(token)
+            if alert_type:
+                children = token.get("children", [])
+
+                # Strip the [!TYPE] marker from the first paragraph's inlines
+                if children and children[0].get("type") == "paragraph":
+                    first_para = children[0]
+                    inlines = first_para.get("children", [])
+
+                    # Remove the "[" and "!TYPE]" text nodes (first two inlines)
+                    stripped = inlines[2:]
+
+                    # Remove leading softbreak if present
+                    if stripped and stripped[0].get("type") == "softbreak":
+                        stripped = stripped[1:]
+
+                    if stripped:
+                        # Keep the first paragraph with remaining inlines
+                        body_children = [
+                            {"type": "paragraph", "children": stripped}
+                        ] + [c for c in children[1:] if c.get("type") != "blank_line"]
+                    else:
+                        # First paragraph had only the marker; use remaining children
+                        body_children = [
+                            c for c in children[1:] if c.get("type") != "blank_line"
+                        ]
+                else:
+                    body_children = children
+
+                result.append(
+                    {
+                        "type": "alert",
+                        "attrs": {"alert_type": alert_type},
+                        "children": body_children,
+                    }
+                )
+                continue
+
+        result.append(token)
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
@@ -554,6 +693,9 @@ def convert_file(input_path, output_dir):
         tokens = preprocess_mermaid(tokens, base_dir)
     except FileNotFoundError:
         pass  # mmdc not installed, leave mermaid blocks as code
+
+    # Preprocess GitHub-style alerts
+    tokens = preprocess_alerts(tokens)
 
     # Create document and render
     doc = Document()
