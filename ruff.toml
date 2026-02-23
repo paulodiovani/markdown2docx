@@ -1,0 +1,6 @@
+line-length = 88
+target-version = "py313"
+extend-include = ["markdown2docx"]
+
+[lint]
+select = ["E", "F", "W"]

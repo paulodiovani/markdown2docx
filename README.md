@@ -19,6 +19,8 @@ Convert GitHub Flavored Markdown files to DOCX format.
 ## Installation
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -30,22 +32,21 @@ npm install -g @mermaid-js/mermaid-cli
 
 ## Usage
 
-Convert a single file:
-
 ```bash
+# Show help
+./markdown2docx --help
+
+# Convert a single file
 ./markdown2docx document.md
-```
 
-Convert multiple files:
-
-```bash
+# Convert multiple files
 ./markdown2docx file1.md file2.md file3.md
-```
 
-Specify output directory:
-
-```bash
+# Specify output directory
 ./markdown2docx document.md -o ./docs
+
+# Convert all example files
+./markdown2docx examples/*.md -o output
 ```
 
 ## Options

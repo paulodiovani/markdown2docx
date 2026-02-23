@@ -117,7 +117,7 @@ def resolve_image_path(url, base_dir):
 
 
 def calculate_image_dimensions(img_path, max_width, max_height):
-    """Calculate width and height to fit within bounding box, preserving aspect ratio."""
+    """Calculate dimensions to fit within bounding box, preserving aspect ratio."""
     image = DocxImage.from_file(str(img_path))
     if image.px_width == 0 or image.px_height == 0:
         return max_width, max_height
@@ -224,7 +224,9 @@ def add_image(doc, url, base_dir):
         doc.add_paragraph(f"[Image not found: {url}]")
         return
     try:
-        width, height = calculate_image_dimensions(img_path, MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT)
+        width, height = calculate_image_dimensions(
+            img_path, MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT
+        )
         doc.add_picture(str(img_path), width=width, height=height)
     except Exception:
         doc.add_picture(str(img_path), width=MAX_IMAGE_WIDTH)
@@ -403,7 +405,9 @@ def render_list(doc, token, base_dir):
 
         # Check for task list item (type is task_list_item)
         is_task = item.get("type") == "task_list_item"
-        checked = item.get("attrs", {}).get("checked", False) if item.get("attrs") else False
+        checked = (
+            item.get("attrs", {}).get("checked", False) if item.get("attrs") else False
+        )
 
         for j, child in enumerate(item_children):
             if child["type"] in ("paragraph", "block_text"):
@@ -463,7 +467,6 @@ def render_table(doc, token, base_dir):
     }
 
     for row_idx, (cells_list, is_header) in enumerate(all_rows):
-
         for col_idx, cell_token in enumerate(cells_list):
             cell = table.rows[row_idx].cells[col_idx]
             para = cell.paragraphs[0]
@@ -490,8 +493,10 @@ def render_thematic_break(doc, token):
     p_pr.append(p_bdr)
 
 
-def render_inline(paragraph, children, base_dir, bold=False, italic=False, strike=False):
-    """Recursive inline renderer for text, strong, emphasis, code, links, images, etc."""
+def render_inline(
+    paragraph, children, base_dir, bold=False, italic=False, strike=False
+):
+    """Recursive inline renderer for text, strong, emphasis, code, links, etc."""
     if children is None:
         return
 
@@ -499,7 +504,11 @@ def render_inline(paragraph, children, base_dir, bold=False, italic=False, strik
         t = child["type"]
 
         if t == "text":
-            raw = child.get("raw", "") or child.get("text", "") or child.get("children", "")
+            raw = (
+                child.get("raw", "")
+                or child.get("text", "")
+                or child.get("children", "")
+            )
             if isinstance(raw, list):
                 raw = extract_text(raw)
             run = paragraph.add_run(raw)
@@ -541,7 +550,11 @@ def render_inline(paragraph, children, base_dir, bold=False, italic=False, strik
             )
 
         elif t == "codespan":
-            raw = child.get("raw", "") or child.get("text", "") or child.get("children", "")
+            raw = (
+                child.get("raw", "")
+                or child.get("text", "")
+                or child.get("children", "")
+            )
             if isinstance(raw, list):
                 raw = extract_text(raw)
             run = paragraph.add_run(raw)
@@ -607,7 +620,10 @@ def preprocess_mermaid(tokens, base_dir):
                         "children": [
                             {
                                 "type": "image",
-                                "attrs": {"src": str(png_path), "alt": "mermaid diagram"},
+                                "attrs": {
+                                    "src": str(png_path),
+                                    "alt": "mermaid diagram",
+                                },
                             }
                         ],
                     }
@@ -674,7 +690,7 @@ def preprocess_alerts(tokens):
 
 
 def convert_file(input_path, output_dir):
-    """Read MD, parse to AST, preprocess mermaid, render DOCX, save, return output path."""
+    """Read MD, parse to AST, preprocess mermaid, render DOCX, save."""
     input_path = Path(input_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

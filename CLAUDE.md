@@ -17,9 +17,17 @@ Single-file CLI tool that converts GitHub Flavored Markdown to DOCX. Python 3.13
 
 # Run with multiple files
 ./markdown2docx file1.md file2.md -o ./output
+
+# Lint check
+ruff check .
+ruff format --check .
+
+# Auto-fix
+ruff check --fix .
+ruff format .
 ```
 
-No test suite or linter is configured.
+No test suite is configured.
 
 ## Architecture
 
