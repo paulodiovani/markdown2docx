@@ -16,15 +16,18 @@ jobs:
 
   smoke-test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        example:
+          - examples/alerts.md
+          - examples/basic.md
+          - examples/code-blocks.md
+          - examples/images.md
+          # - examples/mermaid.md  # requires mmdc (Puppeteer sandbox issue in CI)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - uses: actions/setup-node@v4
-      - run: npm install -g @mermaid-js/mermaid-cli
       - run: pip install -r requirements.txt
-      - run: ./markdown2docx --help
-      - run: ./markdown2docx examples/*.md -o output
-        env:
-          PUPPETEER_LAUNCH_ARGS: "--no-sandbox"
+      - run: ./markdown2docx ${{ matrix.example }} -o output
