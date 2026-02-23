@@ -46,6 +46,7 @@ Everything lives in `markdown2docx` (executable, no `.py` extension). The pipeli
 - **Pygments token hierarchy**: `get_token_style()` walks up `.parent` chain to find a matching style in `TOKEN_STYLES`.
 - **Images are block-level**: All images use `doc.add_picture()` which creates a new paragraph.
 - **Code blocks without language**: Use `TextLexer` (no highlighting) rather than `guess_lexer`.
+- **Do NOT catch errors.** Let exceptions propagate naturally. If a dependency is missing or something fails, the user should see the error.
 
 ## Dependencies
 

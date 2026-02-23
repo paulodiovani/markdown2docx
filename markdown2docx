@@ -223,13 +223,10 @@ def add_image(doc, url, base_dir):
     if not img_path.exists():
         doc.add_paragraph(f"[Image not found: {url}]")
         return
-    try:
-        width, height = calculate_image_dimensions(
-            img_path, MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT
-        )
-        doc.add_picture(str(img_path), width=width, height=height)
-    except Exception:
-        doc.add_picture(str(img_path), width=MAX_IMAGE_WIDTH)
+    width, height = calculate_image_dimensions(
+        img_path, MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT
+    )
+    doc.add_picture(str(img_path), width=width, height=height)
 
 
 # ---------------------------------------------------------------------------
@@ -705,11 +702,8 @@ def convert_file(input_path, output_dir):
     )
     tokens = md(md_text)
 
-    # Preprocess mermaid diagrams (silently skip if mmdc not available)
-    try:
-        tokens = preprocess_mermaid(tokens, base_dir)
-    except FileNotFoundError:
-        pass  # mmdc not installed, leave mermaid blocks as code
+    # Preprocess mermaid diagrams
+    tokens = preprocess_mermaid(tokens, base_dir)
 
     # Preprocess GitHub-style alerts
     tokens = preprocess_alerts(tokens)
