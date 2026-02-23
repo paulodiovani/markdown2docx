@@ -26,3 +26,5 @@ jobs:
       - run: pip install -r requirements.txt
       - run: ./markdown2docx --help
       - run: ./markdown2docx examples/*.md -o output
+        env:
+          PUPPETEER_LAUNCH_ARGS: "--no-sandbox"
