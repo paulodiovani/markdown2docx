@@ -60,3 +60,13 @@ npm install -g @mermaid-js/mermaid-cli
 ## Output
 
 Output files are saved as `<original-filename>.docx` in the output directory. For example, `README.md` becomes `output/README.md.docx`.
+
+## Troubleshooting
+
+### Images fail with `UnrecognizedImageError`
+
+Progressive JPEGs are not supported by the underlying python-docx library. Convert the image to baseline JPEG or PNG first:
+
+```bash
+magick input.jpg -interlace none output.jpg
+```

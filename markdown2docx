@@ -274,8 +274,7 @@ def render_paragraph(doc, token, base_dir):
 
     # Check if paragraph contains only an image
     if len(children) == 1 and children[0]["type"] == "image":
-        img = children[0]
-        src = img.get("attrs", {}).get("src", "") if img.get("attrs") else ""
+        src = children[0].get("attrs", {}).get("src", "")
         if src:
             add_image(doc, src, base_dir)
         return
@@ -570,8 +569,7 @@ def render_inline(
                 add_hyperlink(paragraph, url, link_text)
 
         elif t == "image":
-            attrs = child.get("attrs", {}) or {}
-            src = attrs.get("src", "") or attrs.get("url", "")
+            src = child.get("attrs", {}).get("src", "")
             if src:
                 add_image(paragraph._parent, src, base_dir)
 
@@ -681,6 +679,19 @@ def preprocess_alerts(tokens):
     return result
 
 
+def preprocess_images(tokens):
+    """Normalize image attrs: rename 'url' to 'src' so all images use the same key."""
+    for token in tokens:
+        children = token.get("children", [])
+        if children:
+            for child in children:
+                if child.get("type") == "image":
+                    attrs = child.get("attrs", {})
+                    if attrs and "url" in attrs:
+                        attrs["src"] = attrs.pop("url")
+    return tokens
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
@@ -707,6 +718,9 @@ def convert_file(input_path, output_dir):
 
     # Preprocess GitHub-style alerts
     tokens = preprocess_alerts(tokens)
+
+    # Normalize image attrs (url -> src)
+    tokens = preprocess_images(tokens)
 
     # Create document and render
     doc = Document()
