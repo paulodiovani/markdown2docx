@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 260" width="280" height="260">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#16213e"/>
+    </linearGradient>
+    <linearGradient id="machineBody" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#3e4560"/>
+      <stop offset="100%" style="stop-color:#252b3e"/>
+    </linearGradient>
+    <linearGradient id="machinePanel" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#2a3050"/>
+      <stop offset="100%" style="stop-color:#1e2440"/>
+    </linearGradient>
+    <linearGradient id="mdPage" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#f8f9fa"/>
+      <stop offset="100%" style="stop-color:#e8eaed"/>
+    </linearGradient>
+    <linearGradient id="docxPage" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#dce8f7"/>
+      <stop offset="100%" style="stop-color:#c0d5ee"/>
+    </linearGradient>
+    <filter id="pageShadow">
+      <feDropShadow dx="2" dy="2" stdDeviation="4" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+    <filter id="machineShadow">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000" flood-opacity="0.65"/>
+    </filter>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <!-- Clip: hide the part of MD doc that goes inside the machine -->
+    <clipPath id="mdClip">
+      <rect x="0" y="0" width="280" height="108"/>
+    </clipPath>
+    <!-- Clip: hide the part of DOCX doc that goes inside the machine -->
+    <clipPath id="docxClip">
+      <rect x="0" y="185" width="280" height="80"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="280" height="260" rx="16" fill="url(#bg)"/>
+
+  <!-- ── MD Document entering from top ── -->
+  <g clip-path="url(#mdClip)" filter="url(#pageShadow)">
+    <path d="M106,8 H168 L178,18 V118 H106 Z" fill="url(#mdPage)"/>
+    <path d="M168,8 V18 H178" fill="#cdd0d6" stroke="#b8bcc4" stroke-width="1" stroke-linejoin="round"/>
+    <line x1="115" y1="28" x2="172" y2="28" stroke="#c2c6cc" stroke-width="1.7" stroke-linecap="round"/>
+    <line x1="115" y1="37" x2="166" y2="37" stroke="#d0d3d8" stroke-width="1.1" stroke-linecap="round"/>
+    <line x1="115" y1="45" x2="170" y2="45" stroke="#d0d3d8" stroke-width="1.1" stroke-linecap="round"/>
+    <line x1="115" y1="53" x2="160" y2="53" stroke="#d0d3d8" stroke-width="1.1" stroke-linecap="round"/>
+    <!-- MD Badge -->
+    <rect x="114" y="63" width="50" height="30" rx="5" fill="#2d2d2d"/>
+    <text x="139" y="84" text-anchor="middle"
+      font-family="'SF Mono','Fira Code','Consolas',monospace"
+      font-weight="800" font-size="18" fill="#ffffff" letter-spacing="1">MD</text>
+  </g>
+
+  <!-- Feed-in arrows -->
+  <g fill="#4f8ef7" opacity="0.6" filter="url(#glow)">
+    <polygon points="91,40 97,40 94,47"/>
+    <polygon points="91,50 97,50 94,57"/>
+  </g>
+
+  <!-- ── MACHINE BODY ── -->
+  <g filter="url(#machineShadow)">
+    <!-- Body -->
+    <rect x="40" y="108" width="200" height="80" rx="12" fill="url(#machineBody)"/>
+    <!-- Top highlight edge -->
+    <line x1="52" y1="110" x2="228" y2="110" stroke="#5e6680" stroke-width="1.2" stroke-linecap="round" opacity="0.6"/>
+    <!-- Front panel inset -->
+    <rect x="52" y="132" width="176" height="48" rx="7" fill="url(#machinePanel)"/>
+    <!-- Top paper slot -->
+    <rect x="95" y="105" width="90" height="8" rx="2" fill="#0d1117"/>
+    <line x1="97" y1="108" x2="183" y2="108" stroke="#1e2840" stroke-width="2" stroke-linecap="round"/>
+    <!-- Bottom paper slot -->
+    <rect x="95" y="183" width="90" height="8" rx="2" fill="#0d1117"/>
+    <line x1="97" y1="186" x2="183" y2="186" stroke="#1e2840" stroke-width="2" stroke-linecap="round"/>
+    <!-- Green status LED -->
+    <circle cx="62" cy="148" r="5" fill="#16a34a" opacity="0.8"/>
+    <circle cx="62" cy="148" r="3" fill="#4ade80" filter="url(#glow)"/>
+    <!-- Mini display -->
+    <rect x="78" y="138" width="64" height="22" rx="4" fill="#0d1117"/>
+    <rect x="80" y="140" width="60" height="18" rx="3" fill="#071428"/>
+    <!-- Processing dots -->
+    <circle cx="98"  cy="149" r="3.5" fill="#4f8ef7" opacity="0.9" filter="url(#glow)"/>
+    <circle cx="110" cy="149" r="3.5" fill="#4f8ef7" opacity="0.55"/>
+    <circle cx="122" cy="149" r="3.5" fill="#4f8ef7" opacity="0.25"/>
+    <!-- Power button -->
+    <circle cx="210" cy="149" r="10" fill="#1a2035" stroke="#3a4060" stroke-width="1.5"/>
+    <path d="M210,142 L210,149" stroke="#a259f7" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M205,144.5 A7,7 0 1 0 215,144.5" fill="none" stroke="#a259f7" stroke-width="2.2" stroke-linecap="round" filter="url(#glow)"/>
+    <!-- Side vent lines -->
+    <line x1="44" y1="125" x2="44" y2="133" stroke="#4a5070" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="48" y1="122" x2="48" y2="136" stroke="#4a5070" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="52" y1="120" x2="52" y2="138" stroke="#4a5070" stroke-width="1" stroke-linecap="round"/>
+  </g>
+
+  <!-- ── DOCX Document ejecting from bottom ── -->
+  <g clip-path="url(#docxClip)" filter="url(#pageShadow)">
+    <path d="M106,172 H168 L178,182 V265 H106 Z" fill="url(#docxPage)"/>
+    <path d="M168,172 V182 H178" fill="#a8c4e0" stroke="#8eb0d4" stroke-width="1" stroke-linejoin="round"/>
+    <line x1="115" y1="194" x2="172" y2="194" stroke="#8eb6d8" stroke-width="1.7" stroke-linecap="round"/>
+    <line x1="115" y1="203" x2="166" y2="203" stroke="#a8c6e0" stroke-width="1.1" stroke-linecap="round"/>
+    <line x1="115" y1="211" x2="170" y2="211" stroke="#a8c6e0" stroke-width="1.1" stroke-linecap="round"/>
+    <!-- DOCX Badge -->
+    <rect x="114" y="220" width="50" height="30" rx="5" fill="#2b579a"/>
+    <text x="139" y="241" text-anchor="middle"
+      font-family="'SF Mono','Fira Code','Consolas',monospace"
+      font-weight="800" font-size="13" fill="#ffffff" letter-spacing="0.5">DOCX</text>
+  </g>
+
+  <!-- Eject arrows -->
+  <g fill="#a259f7" opacity="0.6" filter="url(#glow)">
+    <polygon points="184,200 190,200 187,207"/>
+    <polygon points="184,210 190,210 187,217"/>
+  </g>
+</svg>

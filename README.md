@@ -2,6 +2,8 @@
 
 Convert GitHub Flavored Markdown files to DOCX format.
 
+![logo](media/logo.svg)
+
 ## Features
 
 - Headings (h1-h6)
