@@ -1,14 +1,27 @@
-OUTPUT=markdown2docx
-PREFIX=$(HOME)/.local/bin
+.PHONY: clean install lint format
+
+# Use the existing venv
+PIP = .venv/bin/pip
+PYTHON = .venv/bin/python
+
+OUTPUT = markdown2docx
+PREFIX = $(HOME)/.local
 
 build:
-	pip install pyinstaller
-	pyinstaller --onefile $(OUTPUT).py
+	@echo "Building standalone executable..."
+	$(PIP) install pyinstaller
+	$(PYTHON) -m PyInstaller --onefile --name $(OUTPUT) $(OUTPUT).py
 
-.PHONY: clean
 clean:
-	rm -rf build dist $(OUTPUT).spec
+	rm -rf build dist *.spec
 
-.PHONY: install
 install: build
-	cp -v dist/$(OUTPUT) $(PREFIX)
+	@echo "Installing to $(PREFIX)/bin..."
+	@mkdir -p $(PREFIX)/bin
+	cp dist/markdown2docx $(PREFIX)/bin/
+
+lint:
+	$(PYTHON) -m ruff check .
+
+format:
+	$(PYTHON) -m ruff format .
