@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """markdown2docx -- Convert GitHub Flavored Markdown files to DOCX format."""
 
 import os
