@@ -30,4 +30,4 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -r requirements.txt
-      - run: ./markdown2docx ${{ matrix.example }} -o output
+      - run: python markdown2docx.py ${{ matrix.example }} -o output
