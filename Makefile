@@ -1,3 +1,4 @@
+.DEFAULT_GOAL := build
 .PHONY: clean install lint format
 
 # Use the existing venv
@@ -7,7 +8,12 @@ PYTHON = .venv/bin/python
 OUTPUT = markdown2docx
 PREFIX = $(HOME)/.local
 
-build:
+.venv:
+	@echo "Setting up virtual environment..."
+	python3 -m venv .venv
+	$(PIP) install -r requirements.txt
+
+build: .venv
 	@echo "Building standalone executable..."
 	$(PIP) install pyinstaller
 	$(PYTHON) -m PyInstaller --onefile --name $(OUTPUT) $(OUTPUT).py

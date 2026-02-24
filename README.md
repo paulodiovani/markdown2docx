@@ -20,6 +20,8 @@ Convert GitHub Flavored Markdown files to DOCX format.
 
 ## Installation
 
+### Development
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
@@ -31,6 +33,8 @@ For Mermaid diagram support, install the Mermaid CLI:
 ```bash
 npm install -g @mermaid-js/mermaid-cli
 ```
+
+### Distribution
 
 To install as an executable under `~/.local/bin`, run:
 
