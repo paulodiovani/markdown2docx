@@ -27,13 +27,6 @@ def parse_file(input_path):
 @click.command()
 @click.argument("files", nargs=-1, required=True, type=click.Path(exists=True))
 @click.option(
-    "--output",
-    "-o",
-    default="./output",
-    type=click.Path(),
-    help="Output directory for temporary files (default: ./output)",
-)
-@click.option(
     "--page-id",
     default=None,
     help="ID of an existing Confluence page to update.",
@@ -48,7 +41,7 @@ def parse_file(input_path):
     default=None,
     help="Confluence space key (required when creating a new page).",
 )
-def main(files, output, page_id, parent_id, space_key):
+def main(files, page_id, parent_id, space_key):
     """Convert one or more Markdown files to Confluence pages."""
     if not page_id and not parent_id:
         raise click.UsageError("One of --page-id or --parent-id is required.")
