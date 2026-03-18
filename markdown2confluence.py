@@ -1,6 +1,5 @@
 """markdown2confluence -- Convert GitHub Flavored Markdown files to Confluence pages."""
 
-import html
 from pathlib import Path
 
 import click
@@ -8,30 +7,57 @@ import click
 from lib.alerts import preprocess_alerts
 from lib.confluence import ConfluenceClient
 from lib.mermaid import preprocess_mermaid
-from lib.parser import (
-    create_parser,
-    extract_text,
-    preprocess_images,
-    resolve_image_path,
-)
+from lib.parser import create_parser, extract_text, preprocess_images
 
 
 # ---------------------------------------------------------------------------
-# Storage format renderer
+# ADF helpers
 # ---------------------------------------------------------------------------
 
 
-def render_tokens(tokens, base_dir, client=None, page_id=None, uploaded=None):
-    """Render all top-level tokens to a Confluence storage format string."""
-    return "".join(
-        render_block(t, base_dir, client=client, page_id=page_id, uploaded=uploaded)
-        for t in tokens
-    )
+def _text(text, *marks):
+    """Build an ADF text node, optionally with marks."""
+    node = {"type": "text", "text": text}
+    if marks:
+        node["marks"] = list(marks)
+    return node
 
 
-def render_block(token, base_dir, client=None, page_id=None, uploaded=None):
-    """Dispatch to render_{type} by token type."""
-    t = token["type"]
+def _mark(type_, **attrs):
+    """Build an ADF mark dict."""
+    m = {"type": type_}
+    if attrs:
+        m["attrs"] = attrs
+    return m
+
+
+def _add_mark(nodes, mark):
+    """Return a copy of *nodes* with *mark* appended to every text node."""
+    result = []
+    for node in nodes:
+        if node.get("type") == "text":
+            new_node = {**node, "marks": node.get("marks", []) + [mark]}
+            result.append(new_node)
+        else:
+            result.append(node)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# ADF renderer  (each render_* returns a list of ADF block nodes)
+# ---------------------------------------------------------------------------
+
+
+def render_to_adf(tokens, base_dir, **kw):
+    """Render a token list to a complete ADF document dict."""
+    content = []
+    for token in tokens:
+        content.extend(render_block(token, base_dir, **kw))
+    return {"type": "doc", "version": 1, "content": content}
+
+
+def render_block(token, base_dir, **kw):
+    """Dispatch to render_{type}; always returns a list of ADF nodes."""
     dispatch = {
         "heading": render_heading,
         "paragraph": render_paragraph,
@@ -42,91 +68,65 @@ def render_block(token, base_dir, client=None, page_id=None, uploaded=None):
         "table": render_table,
         "thematic_break": render_thematic_break,
     }
-    handler = dispatch.get(t)
-    if handler:
-        return handler(
-            token, base_dir, client=client, page_id=page_id, uploaded=uploaded
-        )
-    return ""
+    handler = dispatch.get(token["type"])
+    return handler(token, base_dir, **kw) if handler else []
 
 
-def render_heading(token, base_dir, **kwargs):
-    """Render a heading token to <h1>…<h6>."""
+def render_heading(token, base_dir, **kw):
     level = token.get("attrs", {}).get("level", 1) if token.get("attrs") else 1
-    inner = render_inline(token.get("children", []), base_dir, **kwargs)
-    return f"<h{level}>{inner}</h{level}>"
+    content = render_inline(token.get("children", []), base_dir, **kw)
+    return [{"type": "heading", "attrs": {"level": level}, "content": content}]
 
 
-def render_paragraph(
-    token, base_dir, client=None, page_id=None, uploaded=None, **kwargs
-):
-    """Render a paragraph token to <p>…</p>, handling image-only paragraphs."""
+def render_paragraph(token, base_dir, client=None, page_id=None, uploaded=None, **kw):
     children = token.get("children", [])
-
-    # Image-only paragraph: render as a block image
+    # Image-only paragraph → block image (implemented fully in task 5)
     if len(children) == 1 and children[0]["type"] == "image":
-        return render_image_block(
+        return _render_image_block(
             children[0], base_dir, client=client, page_id=page_id, uploaded=uploaded
         )
-
-    inner = render_inline(
-        children, base_dir, client=client, page_id=page_id, uploaded=uploaded
+    content = render_inline(
+        children, base_dir, client=client, page_id=page_id, uploaded=uploaded, **kw
     )
-    if inner:
-        return f"<p>{inner}</p>"
-    return ""
+    return [{"type": "paragraph", "content": content}] if content else []
 
 
-def render_image_block(token, base_dir, client=None, page_id=None, uploaded=None):
-    """Render a standalone image token as a Confluence attachment or placeholder."""
+def _render_image_block(token, base_dir, client=None, page_id=None, uploaded=None):
+    """Placeholder; task 5 replaces this with a real mediaSingle node."""
     src = token.get("attrs", {}).get("src", "")
-    alt = token.get("attrs", {}).get("alt", "")
-    if not src:
-        return ""
-
-    if client and page_id:
-        img_path = resolve_image_path(src, base_dir)
-        if img_path.exists():
-            filename = client.ensure_attachment(page_id, str(img_path), uploaded)
-            return (
-                f'<p><ac:image ac:alt="{html.escape(alt)}">'
-                f'<ri:attachment ri:filename="{html.escape(filename)}"/>'
-                f"</ac:image></p>"
-            )
-
-    return f"<p>[image: {html.escape(alt or src)}]</p>"
+    alt = token.get("attrs", {}).get("alt", "") or src
+    return [{"type": "paragraph", "content": [_text(f"[image: {alt}]")]}]
 
 
-def render_block_code(token, base_dir, **kwargs):
-    """Render a code block as plain <pre><code> (upgraded to macro in task 4)."""
+def render_block_code(token, base_dir, **kw):
     raw = token.get("raw", "") or token.get("text", "")
     info = token.get("attrs", {}).get("info", "") if token.get("attrs") else ""
     lang = info.split()[0] if info else ""
-    escaped = html.escape(raw)
+    node = {"type": "codeBlock", "content": [{"type": "text", "text": raw}]}
     if lang:
-        return f'<pre><code class="language-{html.escape(lang)}">{escaped}</code></pre>'
-    return f"<pre><code>{escaped}</code></pre>"
+        node["attrs"] = {"language": lang}
+    return [node]
 
 
-def render_block_quote(token, base_dir, **kwargs):
-    """Render a blockquote."""
-    children = token.get("children", [])
-    inner = "".join(render_block(c, base_dir, **kwargs) for c in children)
-    return f"<blockquote>{inner}</blockquote>"
+def render_block_quote(token, base_dir, **kw):
+    content = []
+    for child in token.get("children", []):
+        content.extend(render_block(child, base_dir, **kw))
+    return [{"type": "blockquote", "content": content}]
 
 
-def render_alert(token, base_dir, **kwargs):
-    """Render a GitHub-style alert as a blockquote (upgraded to macro in task 7)."""
-    children = token.get("children", [])
-    inner = "".join(render_block(c, base_dir, **kwargs) for c in children)
-    return f"<blockquote>{inner}</blockquote>"
+def render_alert(token, base_dir, **kw):
+    """Placeholder; task 7 replaces this with a Confluence panel extension."""
+    content = []
+    for child in token.get("children", []):
+        content.extend(render_block(child, base_dir, **kw))
+    return [{"type": "blockquote", "content": content}]
 
 
-def render_list(token, base_dir, **kwargs):
-    """Render ordered, unordered, and task lists."""
+def render_list(token, base_dir, **kw):
     attrs = token.get("attrs", {}) or {}
     ordered = attrs.get("ordered", False)
-    tag = "ol" if ordered else "ul"
+    list_type = "orderedList" if ordered else "bulletList"
     items = []
     for item in token.get("children", []):
         item_children = item.get("children", [])
@@ -134,37 +134,44 @@ def render_list(token, base_dir, **kwargs):
         checked = (
             item.get("attrs", {}).get("checked", False) if item.get("attrs") else False
         )
-        parts = []
+        item_content = []
         for j, child in enumerate(item_children):
             if child["type"] in ("paragraph", "block_text"):
-                prefix = ""
+                inline = render_inline(child.get("children", []), base_dir, **kw)
                 if is_task and j == 0:
                     prefix = "\u2611 " if checked else "\u2610 "
-                inner = render_inline(child.get("children", []), base_dir, **kwargs)
-                parts.append(f"<p>{html.escape(prefix)}{inner}</p>")
+                    inline = [_text(prefix)] + inline
+                item_content.append({"type": "paragraph", "content": inline})
             elif child["type"] == "list":
-                parts.append(render_list(child, base_dir, **kwargs))
+                item_content.extend(render_list(child, base_dir, **kw))
             else:
-                parts.append(render_block(child, base_dir, **kwargs))
-        items.append(f"<li>{''.join(parts)}</li>")
-    return f"<{tag}>{''.join(items)}</{tag}>"
+                item_content.extend(render_block(child, base_dir, **kw))
+        items.append({"type": "listItem", "content": item_content})
+    node = {"type": list_type, "content": items}
+    if ordered:
+        node["attrs"] = {"order": 1}
+    return [node]
 
 
-def render_table(token, base_dir, **kwargs):
-    """Render a table (implemented in task 3; stub returns empty string)."""
-    return ""
+def render_table(token, base_dir, **kw):
+    """Placeholder; task 3 implements full table rendering."""
+    return []
 
 
-def render_thematic_break(token, base_dir, **kwargs):
-    """Render a horizontal rule."""
-    return "<hr />"
+def render_thematic_break(token, base_dir, **kw):
+    return [{"type": "rule"}]
 
 
-def render_inline(children, base_dir, **kwargs):
-    """Recursive inline renderer for text, formatting, links, images, breaks."""
+# ---------------------------------------------------------------------------
+# Inline renderer  (returns a list of ADF inline nodes)
+# ---------------------------------------------------------------------------
+
+
+def render_inline(children, base_dir, **kw):
+    """Render inline token children to a list of ADF inline nodes."""
     if not children:
-        return ""
-    parts = []
+        return []
+    nodes = []
     for child in children:
         t = child["type"]
 
@@ -176,61 +183,140 @@ def render_inline(children, base_dir, **kwargs):
             )
             if isinstance(raw, list):
                 raw = extract_text(raw)
-            parts.append(html.escape(raw))
+            if raw:
+                nodes.append(_text(raw))
 
         elif t == "strong":
-            inner = render_inline(child.get("children", []), base_dir, **kwargs)
-            parts.append(f"<strong>{inner}</strong>")
+            inner = render_inline(child.get("children", []), base_dir, **kw)
+            nodes.extend(_add_mark(inner, _mark("strong")))
 
         elif t == "emphasis":
-            inner = render_inline(child.get("children", []), base_dir, **kwargs)
-            parts.append(f"<em>{inner}</em>")
+            inner = render_inline(child.get("children", []), base_dir, **kw)
+            nodes.extend(_add_mark(inner, _mark("em")))
 
         elif t == "strikethrough":
-            inner = render_inline(child.get("children", []), base_dir, **kwargs)
-            parts.append(f"<del>{inner}</del>")
+            inner = render_inline(child.get("children", []), base_dir, **kw)
+            nodes.extend(_add_mark(inner, _mark("strike")))
 
         elif t == "codespan":
             raw = child.get("raw", "") or child.get("text", "")
             if isinstance(raw, list):
                 raw = extract_text(raw)
-            parts.append(f"<code>{html.escape(raw)}</code>")
+            nodes.append(_text(raw, _mark("code")))
 
         elif t == "link":
             attrs = child.get("attrs", {}) or {}
             url = attrs.get("url", "") or attrs.get("href", "")
-            link_text = render_inline(child.get("children", []), base_dir, **kwargs)
+            inner = render_inline(child.get("children", []), base_dir, **kw)
             if url:
-                parts.append(f'<a href="{html.escape(url)}">{link_text}</a>')
+                nodes.extend(_add_mark(inner, _mark("link", href=url)))
 
         elif t == "image":
-            # Inline image (inside paragraph with other content)
-            src = child.get("attrs", {}).get("src", "")
+            # Inline image placeholder (task 5 handles real uploads)
             alt = child.get("attrs", {}).get("alt", "")
-            client = kwargs.get("client")
-            page_id = kwargs.get("page_id")
-            uploaded = kwargs.get("uploaded")
-            if client and page_id and src:
-                img_path = resolve_image_path(src, base_dir)
-                if img_path.exists():
-                    filename = client.ensure_attachment(
-                        page_id, str(img_path), uploaded
-                    )
-                    parts.append(
-                        f'<ac:image ac:alt="{html.escape(alt)}">'
-                        f'<ri:attachment ri:filename="{html.escape(filename)}"/>'
-                        f"</ac:image>"
-                    )
-                    continue
-            parts.append(f"[image: {html.escape(alt or src)}]")
+            src = child.get("attrs", {}).get("src", "")
+            nodes.append(_text(f"[image: {alt or src}]"))
 
         elif t == "softbreak":
-            parts.append(" ")
+            nodes.append(_text(" "))
 
         elif t == "linebreak":
-            parts.append("<br />")
+            nodes.append({"type": "hardBreak"})
 
-    return "".join(parts)
+    return nodes
+
+
+# ---------------------------------------------------------------------------
+# Inline comment re-injection
+# ---------------------------------------------------------------------------
+
+
+def reapply_comment_marks(adf_doc, comments):
+    """Best-effort re-application of inline comment annotation marks.
+
+    For each open comment, ``inlineOriginalSelection`` is searched within every
+    inline context (paragraph, heading, table cell).  When found, the matching
+    text nodes receive an ``annotation`` mark so the comment stays anchored.
+
+    Comments whose selection text spans block boundaries (e.g. a heading plus
+    several list items) cannot be re-anchored automatically and are reported as
+    warnings; Confluence will orphan them.
+    """
+    markers = {}
+    for comment in comments:
+        props = comment.get("properties", {})
+        ref = props.get("inlineMarkerRef")
+        selection = props.get("inlineOriginalSelection")
+        if ref and selection:
+            markers[ref] = selection
+
+    if not markers:
+        return adf_doc
+
+    applied: set = set()
+    _walk_and_inject(adf_doc.get("content", []), markers, applied)
+
+    for ref, selection in markers.items():
+        if ref not in applied:
+            preview = selection[:40] + "…" if len(selection) > 40 else selection
+            click.echo(
+                f'  Warning: inline comment on "{preview}" could not be '
+                f"re-anchored (text not found or spans block boundaries).",
+                err=True,
+            )
+
+    return adf_doc
+
+
+def _walk_and_inject(content, markers, applied):
+    """Recursively walk ADF block nodes, injecting marks in inline contexts."""
+    for node in content:
+        node_type = node.get("type")
+        node_content = node.get("content", [])
+        if node_type in ("paragraph", "heading", "tableCell", "tableHeader"):
+            _inject_into_inline(node_content, markers, applied)
+        if node_content:
+            _walk_and_inject(node_content, markers, applied)
+
+
+def _inject_into_inline(inline_nodes, markers, applied):
+    """Find comment selections in consecutive text nodes and add annotation marks.
+
+    Builds a position map over all text nodes in *inline_nodes*, then for each
+    unmatched marker checks whether its selection appears in the concatenated
+    text.  All text nodes that overlap the match receive the annotation mark.
+    """
+    # Build position map: [(start, end, index)] for text nodes only
+    pos_map = []
+    full_text = ""
+    for i, node in enumerate(inline_nodes):
+        if node.get("type") == "text":
+            t = node.get("text", "")
+            pos_map.append((len(full_text), len(full_text) + len(t), i))
+            full_text += t
+        else:
+            pos_map.append(None)
+
+    for ref, selection in markers.items():
+        if ref in applied:
+            continue
+        idx = full_text.find(selection)
+        if idx == -1:
+            continue
+
+        sel_end = idx + len(selection)
+        mark = _mark("annotation", annotationType="inlineComment", id=ref)
+
+        for pos_info in pos_map:
+            if pos_info is None:
+                continue
+            n_start, n_end, n_idx = pos_info
+            if n_end <= idx or n_start >= sel_end:
+                continue  # no overlap
+            existing = inline_nodes[n_idx].get("marks", [])
+            inline_nodes[n_idx]["marks"] = existing + [mark]
+
+        applied.add(ref)
 
 
 # ---------------------------------------------------------------------------
@@ -239,7 +325,7 @@ def render_inline(children, base_dir, **kwargs):
 
 
 def extract_title(tokens, fallback):
-    """Return the text of the first h1 in the token list, or fallback."""
+    """Return the text of the first h1 in the token list, or *fallback*."""
     for token in tokens:
         if token["type"] == "heading":
             level = token.get("attrs", {}).get("level", 1) if token.get("attrs") else 1
@@ -254,7 +340,7 @@ def extract_title(tokens, fallback):
 
 
 def convert_file(input_path, client, page_id=None, parent_id=None, space_key=None):
-    """Parse MD, render to storage format, then create or update a Confluence page."""
+    """Parse MD, render to ADF, re-apply comment marks, then create/update page."""
     input_path = Path(input_path)
     md_text = input_path.read_text(encoding="utf-8")
     base_dir = str(input_path.parent)
@@ -265,43 +351,40 @@ def convert_file(input_path, client, page_id=None, parent_id=None, space_key=Non
     tokens = preprocess_alerts(tokens)
     tokens = preprocess_images(tokens)
 
-    # Determine target page ID for attachment uploads
-    target_page_id = page_id
-
     if page_id:
         page = client.get_page(page_id)
         title = page["title"]
         version = page["version"]["number"]
-        # Fetch existing attachments once to avoid repeated API calls
         existing_attachments = client.get_attachments(page_id)
-        body = render_tokens(
+
+        adf_doc = render_to_adf(
             tokens,
             base_dir,
             client=client,
-            page_id=target_page_id,
+            page_id=page_id,
             uploaded=existing_attachments,
         )
-        click.echo(
-            "Warning: updating this page will resolve any inline comments "
-            "whose anchored text no longer exists in the new content.",
-            err=True,
-        )
-        result = client.update_page(page_id, version, title, body)
+
+        # Re-apply inline comment marks before overwriting the body
+        comments = client.get_inline_comments(page_id)
+        adf_doc = reapply_comment_marks(adf_doc, comments)
+
+        result = client.update_page(page_id, version, title, adf_doc)
     else:
         title = extract_title(tokens, input_path.stem)
-        # Create page first (empty body) to get the page ID for attachments
-        result = client.create_page(parent_id, space_key, title, "")
+        # Create an empty page first so we have a page_id for attachment uploads
+        result = client.create_page(parent_id, space_key, title)
         target_page_id = result["id"]
-        body = render_tokens(
+
+        adf_doc = render_to_adf(
             tokens,
             base_dir,
             client=client,
             page_id=target_page_id,
             uploaded={},
         )
-        # Update with the rendered body
         result = client.update_page(
-            target_page_id, result["version"]["number"], title, body
+            target_page_id, result["version"]["number"], title, adf_doc
         )
 
     return client.page_url(result)
