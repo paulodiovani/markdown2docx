@@ -155,8 +155,53 @@ def render_list(token, base_dir, **kw):
 
 
 def render_table(token, base_dir, **kw):
-    """Placeholder; task 3 implements full table rendering."""
-    return []
+    """Render a GFM table to an ADF table node."""
+    children = token.get("children", [])
+    if not children:
+        return []
+
+    head = None
+    body_rows = []
+    for child in children:
+        if child["type"] == "table_head":
+            head = child
+        elif child["type"] == "table_body":
+            body_rows = child.get("children", [])
+
+    # Collect column alignments from header cells (left/center/right/None)
+    aligns = []
+    if head:
+        for cell in head.get("children", []):
+            aligns.append((cell.get("attrs") or {}).get("align"))
+
+    adf_rows = []
+
+    if head:
+        adf_rows.append(
+            _table_row(head.get("children", []), aligns, True, base_dir, **kw)
+        )
+    for row in body_rows:
+        adf_rows.append(
+            _table_row(row.get("children", []), aligns, False, base_dir, **kw)
+        )
+
+    if not adf_rows:
+        return []
+
+    return [{"type": "table", "content": adf_rows}]
+
+
+def _table_row(cells, aligns, is_header, base_dir, **kw):
+    cell_type = "tableHeader" if is_header else "tableCell"
+    adf_cells = []
+    for i, cell in enumerate(cells):
+        inline = render_inline(cell.get("children", []), base_dir, **kw)
+        align = aligns[i] if i < len(aligns) else None
+        para = {"type": "paragraph", "content": inline}
+        if align in ("left", "center", "right"):
+            para["attrs"] = {"alignment": align}
+        adf_cells.append({"type": cell_type, "content": [para]})
+    return {"type": "tableRow", "content": adf_cells}
 
 
 def render_thematic_break(token, base_dir, **kw):
