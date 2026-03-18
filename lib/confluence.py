@@ -96,7 +96,11 @@ class ConfluenceClient:
         and ``properties.inlineOriginalSelection`` (the highlighted text).
         """
         url = f"{self.base_url}/wiki/api/v2/pages/{page_id}/inline-comments"
-        resp = requests.get(url, params={"status": "open"}, auth=self.auth)
+        resp = requests.get(
+            url,
+            params={"status": "current", "resolution-status": "open"},
+            auth=self.auth,
+        )
         resp.raise_for_status()
         return resp.json().get("results", [])
 
