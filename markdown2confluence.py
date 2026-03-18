@@ -1,5 +1,6 @@
 """markdown2confluence -- Convert GitHub Flavored Markdown files to Confluence pages."""
 
+from collections import defaultdict
 from pathlib import Path
 
 import click
@@ -231,92 +232,192 @@ def render_inline(children, base_dir, **kw):
 # ---------------------------------------------------------------------------
 
 
-def reapply_comment_marks(adf_doc, comments):
-    """Best-effort re-application of inline comment annotation marks.
+def reapply_comment_marks(new_adf, old_adf, comments):
+    """Re-apply inline comment annotation marks from old_adf onto new_adf.
 
-    For each open comment, ``inlineOriginalSelection`` is searched within every
-    inline context (paragraph, heading, table cell).  When found, the matching
-    text nodes receive an ``annotation`` mark so the comment stays anchored.
+    Uses a two-phase approach to handle both cross-block selections and
+    duplicate text:
 
-    Comments whose selection text spans block boundaries (e.g. a heading plus
-    several list items) cannot be re-anchored automatically and are reported as
-    warnings; Confluence will orphan them.
+    **Phase 1 – structural anchor:** Walk old_adf to find where each
+    annotation mark lives (block index + concatenated selection text, which
+    naturally covers cross-block spans).  Search for that text in the new_adf
+    near the same block index (±3 blocks) to tolerate insertions/deletions.
+
+    **Phase 2 – global fallback:** If the structural search fails (content was
+    moved far away), search the entire document.
+
+    Comments whose text was deleted from the document are warned about and
+    will be orphaned by Confluence.
     """
-    markers = {}
-    for comment in comments:
-        props = comment.get("properties", {})
-        ref = props.get("inlineMarkerRef")
-        selection = props.get("inlineOriginalSelection")
-        if ref and selection:
-            markers[ref] = selection
+    # Primary source: extract annotation positions directly from old ADF body.
+    # This gives us the actual current text (may differ from inlineOriginalSelection
+    # if the page was edited after the comment was created).
+    old_annotations = _extract_annotations_from_adf(old_adf)
 
-    if not markers:
-        return adf_doc
+    # Fallback source: inlineOriginalSelection from the comments API, used for
+    # any UUID that appears in open comments but is already dangling in old ADF.
+    api_selections = {}
+    for c in comments:
+        props = c.get("properties", {})
+        ref = props.get("inlineMarkerRef")
+        sel = props.get("inlineOriginalSelection")
+        if ref and sel:
+            api_selections[ref] = sel
+
+    if not old_annotations and not api_selections:
+        return new_adf
+
+    # Build a global flat text map over the new ADF once.
+    text_nodes, global_text = _build_global_text_map(new_adf.get("content", []))
 
     applied: set = set()
-    _walk_and_inject(adf_doc.get("content", []), markers, applied)
 
-    for ref, selection in markers.items():
-        if ref not in applied:
-            preview = selection[:40] + "…" if len(selection) > 40 else selection
-            click.echo(
-                f'  Warning: inline comment on "{preview}" could not be '
-                f"re-anchored (text not found or spans block boundaries).",
-                err=True,
-            )
+    # Re-anchor comments found in old ADF body using expanding search.
+    for uuid, info in old_annotations.items():
+        selection = info["selection"]
+        anchor = info["anchor_block"]
+        if not selection:
+            continue
+        _apply_expanding_search(
+            text_nodes, global_text, uuid, selection, anchor, applied
+        )
 
-    return adf_doc
+    # Warn about open comments that were already dangling in old ADF body
+    # (no structural anchor available — skipping to avoid false placement).
+    for uuid, sel in api_selections.items():
+        if uuid not in applied:
+            preview = sel[:40] + "…" if len(sel) > 40 else sel
+            if uuid not in old_annotations:
+                click.echo(
+                    f'  Warning: inline comment on "{preview}" was already '
+                    f"dangling before this update — skipping re-anchor.",
+                    err=True,
+                )
+            else:
+                click.echo(
+                    f'  Warning: inline comment on "{preview}" could not be '
+                    f"re-anchored (text deleted).",
+                    err=True,
+                )
+
+    return new_adf
 
 
-def _walk_and_inject(content, markers, applied):
-    """Recursively walk ADF block nodes, injecting marks in inline contexts."""
-    for node in content:
-        node_type = node.get("type")
-        node_content = node.get("content", [])
-        if node_type in ("paragraph", "heading", "tableCell", "tableHeader"):
-            _inject_into_inline(node_content, markers, applied)
-        if node_content:
-            _walk_and_inject(node_content, markers, applied)
+def _extract_annotations_from_adf(adf_doc):
+    """Return ``{uuid: {"anchor_block": int, "selection": str}}`` from old ADF.
 
-
-def _inject_into_inline(inline_nodes, markers, applied):
-    """Find comment selections in consecutive text nodes and add annotation marks.
-
-    Builds a position map over all text nodes in *inline_nodes*, then for each
-    unmatched marker checks whether its selection appears in the concatenated
-    text.  All text nodes that overlap the match receive the annotation mark.
+    Walks every text node collecting annotation marks.  Texts from multiple
+    nodes (including cross-block spans) are concatenated in document order to
+    reconstruct the full selection string.
     """
-    # Build position map: [(start, end, index)] for text nodes only
-    pos_map = []
-    full_text = ""
-    for i, node in enumerate(inline_nodes):
+    # Collect (uuid, block_idx, text) tuples in document order via DFS.
+    entries = []
+    for block_idx, block in enumerate(adf_doc.get("content", []) if adf_doc else []):
+        _collect_annotated_texts(block, block_idx, entries)
+
+    # Group by UUID preserving insertion order.
+    groups = defaultdict(lambda: {"block_indices": [], "texts": []})
+    for uuid, block_idx, text in entries:
+        groups[uuid]["block_indices"].append(block_idx)
+        groups[uuid]["texts"].append(text)
+
+    return {
+        uuid: {
+            "anchor_block": info["block_indices"][0],
+            "selection": "".join(info["texts"]),
+        }
+        for uuid, info in groups.items()
+    }
+
+
+def _collect_annotated_texts(node, block_idx, entries):
+    """DFS helper: appends ``(uuid, block_idx, text)`` for each annotated text node."""
+    if node.get("type") == "text":
+        for mark in node.get("marks", []):
+            if mark.get("type") == "annotation":
+                uuid = mark.get("attrs", {}).get("id")
+                if uuid:
+                    entries.append((uuid, block_idx, node.get("text", "")))
+    for child in node.get("content", []):
+        _collect_annotated_texts(child, block_idx, entries)
+
+
+def _build_global_text_map(blocks):
+    """Flatten all text nodes into ``(node_ref, block_idx, start, end)`` tuples.
+
+    ``start``/``end`` are character offsets in the returned ``global_text``
+    string, which is the concatenation of every text node in document order.
+    Cross-block selections are naturally handled because all blocks share the
+    same global coordinate space.
+    """
+    text_nodes = []
+    pos = [0]
+
+    def _walk(node, block_idx):
         if node.get("type") == "text":
             t = node.get("text", "")
-            pos_map.append((len(full_text), len(full_text) + len(t), i))
-            full_text += t
-        else:
-            pos_map.append(None)
+            text_nodes.append((node, block_idx, pos[0], pos[0] + len(t)))
+            pos[0] += len(t)
+        for child in node.get("content", []):
+            _walk(child, block_idx)
 
-    for ref, selection in markers.items():
-        if ref in applied:
+    for block_idx, block in enumerate(blocks):
+        _walk(block, block_idx)
+
+    global_text = "".join(n[0].get("text", "") for n in text_nodes)
+    return text_nodes, global_text
+
+
+def _apply_expanding_search(
+    text_nodes, global_text, uuid, selection, anchor_block, applied
+):
+    """Search for *selection* expanding outward from *anchor_block* block by block.
+
+    Tries window sizes 0, 1, 2, … up to the full document extent.  The first
+    match found is the one closest to the original position, so duplicate text
+    elsewhere in the document is never preferred over a nearby occurrence.
+    Cross-block selections are handled naturally via the shared global text map.
+    """
+    if not text_nodes:
+        return False
+
+    max_block = max(n[1] for n in text_nodes)
+    max_window = max(anchor_block, max_block - anchor_block)
+
+    prev_start = prev_end = None
+
+    for window in range(max_window + 1):
+        window_nodes = [n for n in text_nodes if abs(n[1] - anchor_block) <= window]
+        if not window_nodes:
             continue
-        idx = full_text.find(selection)
-        if idx == -1:
+
+        win_start = window_nodes[0][2]
+        win_end = window_nodes[-1][3]
+
+        # Skip if this window covers the same text range as the previous one
+        # (happens when intermediate blocks contain no text nodes, e.g. rule).
+        if win_start == prev_start and win_end == prev_end:
             continue
+        prev_start, prev_end = win_start, win_end
 
-        sel_end = idx + len(selection)
-        mark = _mark("annotation", annotationType="inlineComment", id=ref)
+        idx = global_text.find(selection, win_start, win_end)
+        if idx != -1:
+            return _apply_mark_at(text_nodes, uuid, idx, idx + len(selection), applied)
 
-        for pos_info in pos_map:
-            if pos_info is None:
-                continue
-            n_start, n_end, n_idx = pos_info
-            if n_end <= idx or n_start >= sel_end:
-                continue  # no overlap
-            existing = inline_nodes[n_idx].get("marks", [])
-            inline_nodes[n_idx]["marks"] = existing + [mark]
+    return False
 
-        applied.add(ref)
+
+def _apply_mark_at(text_nodes, uuid, sel_start, sel_end, applied):
+    """Add an annotation mark to every text node overlapping [sel_start, sel_end)."""
+    mark = _mark("annotation", annotationType="inlineComment", id=uuid)
+    matched = False
+    for node_ref, _, start, end in text_nodes:
+        if end > sel_start and start < sel_end:
+            node_ref["marks"] = node_ref.get("marks", []) + [mark]
+            matched = True
+    if matched:
+        applied.add(uuid)
+    return matched
 
 
 # ---------------------------------------------------------------------------
@@ -353,6 +454,7 @@ def convert_file(input_path, client, page_id=None, parent_id=None, space_key=Non
 
     if page_id:
         page = client.get_page(page_id)
+        old_adf = client.get_page_adf(page)
         title = page["title"]
         version = page["version"]["number"]
         existing_attachments = client.get_attachments(page_id)
@@ -365,9 +467,10 @@ def convert_file(input_path, client, page_id=None, parent_id=None, space_key=Non
             uploaded=existing_attachments,
         )
 
-        # Re-apply inline comment marks before overwriting the body
+        # Re-apply annotation marks: use old ADF for structural anchoring,
+        # comments API as fallback for already-dangling marks.
         comments = client.get_inline_comments(page_id)
-        adf_doc = reapply_comment_marks(adf_doc, comments)
+        adf_doc = reapply_comment_marks(adf_doc, old_adf, comments)
 
         result = client.update_page(page_id, version, title, adf_doc)
     else:
