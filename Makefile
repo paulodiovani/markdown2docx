@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := build
-.PHONY: clean install lint format
+.PHONY: clean install uninstall lint format
 
 # Use the existing venv
 PIP = .venv/bin/pip
@@ -16,7 +16,7 @@ PREFIX = $(HOME)/.local
 
 build: .venv
 	@echo "Building standalone executables..."
-	$(PIP) install pyinstaller
+	$(PIP) install pyinstaller pyinstaller-hooks-contrib --upgrade
 	$(PYTHON) -m PyInstaller --onefile --name $(DOCX_OUTPUT) $(DOCX_OUTPUT).py
 	$(PYTHON) -m PyInstaller --onefile --name $(CONFLUENCE_OUTPUT) $(CONFLUENCE_OUTPUT).py
 
@@ -28,6 +28,11 @@ install: build
 	@mkdir -p $(PREFIX)/bin
 	cp dist/$(DOCX_OUTPUT) $(PREFIX)/bin/
 	cp dist/$(CONFLUENCE_OUTPUT) $(PREFIX)/bin/
+
+uninstall:
+	@echo "Removing from $(PREFIX)/bin..."
+	rm -f $(PREFIX)/bin/$(DOCX_OUTPUT)
+	rm -f $(PREFIX)/bin/$(CONFLUENCE_OUTPUT)
 
 lint:
 	$(PYTHON) -m ruff check .
