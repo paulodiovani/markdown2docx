@@ -8,7 +8,10 @@ from pathlib import Path
 TEMP_DIR = Path(tempfile.gettempdir()) / "markdown2docx"
 
 
-def preprocess_mermaid(tokens, base_dir):
+MERMAID_THEMES = ("default", "neutral", "dark", "forest")
+
+
+def preprocess_mermaid(tokens, base_dir, theme=None):
     """Scan AST for mermaid code blocks and replace with image paragraph tokens."""
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
     result = []
@@ -28,10 +31,18 @@ def preprocess_mermaid(tokens, base_dir):
                 png_path = TEMP_DIR / f"{name}.png"
 
                 mmd_path.write_text(raw)
-                subprocess.run(
-                    ["mmdc", "-i", str(mmd_path), "-o", str(png_path)],
-                    check=True,
-                )
+                cmd = [
+                    "mmdc",
+                    "-i",
+                    str(mmd_path),
+                    "-o",
+                    str(png_path),
+                    "-b",
+                    "transparent",
+                ]
+                if theme:
+                    cmd.extend(["-t", theme])
+                subprocess.run(cmd, check=True)
 
                 # Replace with an image paragraph token
                 result.append(

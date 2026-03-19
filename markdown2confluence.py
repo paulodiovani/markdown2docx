@@ -7,7 +7,7 @@ import click
 
 from lib.alerts import preprocess_alerts
 from lib.confluence import ConfluenceClient
-from lib.mermaid import preprocess_mermaid
+from lib.mermaid import MERMAID_THEMES, preprocess_mermaid
 from lib.parser import (
     create_parser,
     extract_text,
@@ -551,7 +551,9 @@ def extract_title(tokens, fallback):
 # ---------------------------------------------------------------------------
 
 
-def convert_file(input_path, client, page_id=None, parent_id=None, space_key=None):
+def convert_file(
+    input_path, client, page_id=None, parent_id=None, space_key=None, theme=None
+):
     """Parse MD, render to ADF, re-apply comment marks, then create/update page."""
     input_path = Path(input_path)
     md_text = input_path.read_text(encoding="utf-8")
@@ -559,7 +561,7 @@ def convert_file(input_path, client, page_id=None, parent_id=None, space_key=Non
 
     md = create_parser()
     tokens = md(md_text)
-    tokens = preprocess_mermaid(tokens, base_dir)
+    tokens = preprocess_mermaid(tokens, base_dir, theme=theme)
     tokens = preprocess_alerts(tokens)
     tokens = preprocess_images(tokens)
 
@@ -626,7 +628,13 @@ def convert_file(input_path, client, page_id=None, parent_id=None, space_key=Non
     default=None,
     help="Confluence space key (required when creating a new page).",
 )
-def main(files, page_id, parent_id, space_key):
+@click.option(
+    "--theme",
+    type=click.Choice(MERMAID_THEMES),
+    default=None,
+    help="Mermaid diagram theme.",
+)
+def main(files, page_id, parent_id, space_key, theme):
     """Convert one or more Markdown files to Confluence pages."""
     if not page_id and not parent_id:
         raise click.UsageError("One of --page-id or --parent-id is required.")
@@ -637,7 +645,12 @@ def main(files, page_id, parent_id, space_key):
 
     for f in files:
         url = convert_file(
-            f, client, page_id=page_id, parent_id=parent_id, space_key=space_key
+            f,
+            client,
+            page_id=page_id,
+            parent_id=parent_id,
+            space_key=space_key,
+            theme=theme,
         )
         click.echo(f"Published: {f} -> {url}")
 
