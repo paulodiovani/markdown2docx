@@ -6,7 +6,8 @@ import os
 
 import click
 import requests
-from dotenv import load_dotenv
+
+from lib.config import load_config
 
 _HASH_PREFIX = "md5:"
 
@@ -43,10 +44,11 @@ class ConfluenceClient:
     """Thin wrapper around the Confluence REST API."""
 
     def __init__(self):
-        load_dotenv()
-        self.email = os.environ["CONFLUENCE_EMAIL"]
-        self.api_token = os.environ["CONFLUENCE_API_TOKEN"]
-        self.base_url = os.environ["CONFLUENCE_URL"].rstrip("/")
+        config, config_path = load_config()
+        click.echo(f"Using config: {config_path}", err=True)
+        self.email = config["email"]
+        self.api_token = config["api_token"]
+        self.base_url = config["url"].rstrip("/")
         self.auth = (self.email, self.api_token)
 
     # ------------------------------------------------------------------
