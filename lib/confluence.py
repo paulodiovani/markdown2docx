@@ -1,11 +1,38 @@
 """Confluence REST API client (v1 for page CRUD + attachments, v2 for comments)."""
 
+import hashlib
 import json
 import os
 
 import click
 import requests
 from dotenv import load_dotenv
+
+_HASH_PREFIX = "md5:"
+
+
+def _file_hash(file_path):
+    """Return the hex MD5 digest of a local file."""
+    h = hashlib.md5()
+    with open(file_path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _attachment_media_info(attachment, filename):
+    """Extract ADF media info from a Confluence attachment API response dict."""
+    ext = attachment.get("extensions", {})
+    metadata = attachment.get("metadata", {})
+    return {
+        "id": attachment.get("id"),
+        "filename": attachment.get("title", filename),
+        "media_id": ext.get("fileId"),
+        "collection": ext.get("collectionName"),
+        # Stored hash lets ensure_attachment detect content changes.
+        "stored_hash": metadata.get("comment", ""),
+    }
+
 
 # Minimal ADF document used as a placeholder body when creating a new page
 # before its real content is ready (e.g. attachments must be uploaded first).
@@ -109,44 +136,77 @@ class ConfluenceClient:
     # ------------------------------------------------------------------
 
     def upload_attachment(self, page_id, file_path):
-        """Upload a file as an attachment; return the stored filename."""
+        """Upload a file as an attachment; return its media info dict.
+
+        Stores an MD5 hash in the attachment comment so future runs can detect
+        content changes without re-downloading the remote file.
+        """
         url = f"{self.base_url}/wiki/rest/api/content/{page_id}/child/attachment"
+        file_hash = _file_hash(file_path)
         with open(file_path, "rb") as fh:
             resp = requests.post(
                 url,
+                data={"comment": f"{_HASH_PREFIX}{file_hash}"},
                 files={"file": (os.path.basename(file_path), fh)},
                 headers={"X-Atlassian-Token": "no-check"},
+                params={"expand": "extensions,metadata"},
                 auth=self.auth,
             )
         resp.raise_for_status()
         results = resp.json().get("results", [])
-        return results[0]["title"] if results else os.path.basename(file_path)
+        att = results[0] if results else {}
+        info = _attachment_media_info(att, os.path.basename(file_path))
+        if not info["media_id"]:
+            click.echo(
+                f"  Warning: media_id missing for {info['filename']}. "
+                f"extensions={att.get('extensions', {})}",
+                err=True,
+            )
+        return info
 
     def get_attachments(self, page_id):
-        """Return ``{filename: attachment_id}`` for an existing page."""
+        """Return ``{filename: media_info}`` for all attachments on a page.
+
+        Each value is a dict with ``id``, ``media_id``, ``collection`` and
+        ``stored_hash`` for change detection.
+        """
         url = f"{self.base_url}/wiki/rest/api/content/{page_id}/child/attachment"
-        resp = requests.get(url, auth=self.auth)
+        resp = requests.get(
+            url, params={"expand": "extensions,metadata"}, auth=self.auth
+        )
         resp.raise_for_status()
-        return {r["title"]: r["id"] for r in resp.json().get("results", [])}
+        return {
+            r["title"]: _attachment_media_info(r, r["title"])
+            for r in resp.json().get("results", [])
+        }
 
     def update_attachment(self, page_id, attachment_id, file_path):
-        """Replace an existing attachment with a new file version."""
+        """Replace an existing attachment with a new file version, storing its hash."""
         url = (
             f"{self.base_url}/wiki/rest/api/content/{page_id}"
             f"/child/attachment/{attachment_id}/data"
         )
+        file_hash = _file_hash(file_path)
         with open(file_path, "rb") as fh:
             resp = requests.post(
                 url,
+                data={"comment": f"{_HASH_PREFIX}{file_hash}"},
                 files={"file": (os.path.basename(file_path), fh)},
                 headers={"X-Atlassian-Token": "no-check"},
+                params={"expand": "extensions,metadata"},
                 auth=self.auth,
             )
         resp.raise_for_status()
-        return resp.json()
+        att = resp.json()
+        return _attachment_media_info(att, os.path.basename(file_path))
 
     def ensure_attachment(self, page_id, file_path, existing=None):
-        """Upload or update an attachment; return the stored filename.
+        """Return media info for an attachment, uploading/updating only when needed.
+
+        Compares the MD5 hash of the local file against the hash stored in the
+        attachment comment (written by a previous upload).  Re-uploads only when
+        the content has actually changed, so unchanged images and regenerated
+        diagrams that produce identical output are skipped efficiently.
 
         Pass the result of ``get_attachments()`` as *existing* to avoid an
         extra API call when processing multiple files for the same page.
@@ -155,9 +215,13 @@ class ConfluenceClient:
         if existing is None:
             existing = self.get_attachments(page_id)
         if filename in existing:
-            click.echo(f"  Updating attachment: {filename}", err=True)
-            self.update_attachment(page_id, existing[filename], file_path)
-        else:
-            click.echo(f"  Uploading attachment: {filename}", err=True)
-            self.upload_attachment(page_id, file_path)
-        return filename
+            info = existing[filename]
+            stored = info.get("stored_hash", "")
+            local_hash = _file_hash(file_path)
+            if stored == f"{_HASH_PREFIX}{local_hash}":
+                click.echo(f"  Attachment unchanged, skipping: {filename}", err=True)
+                return info
+            click.echo(f"  Attachment changed, re-uploading: {filename}", err=True)
+            return self.update_attachment(page_id, info["id"], file_path)
+        click.echo(f"  Uploading attachment: {filename}", err=True)
+        return self.upload_attachment(page_id, file_path)

@@ -8,7 +8,12 @@ import click
 from lib.alerts import preprocess_alerts
 from lib.confluence import ConfluenceClient
 from lib.mermaid import preprocess_mermaid
-from lib.parser import create_parser, extract_text, preprocess_images
+from lib.parser import (
+    create_parser,
+    extract_text,
+    preprocess_images,
+    resolve_image_path,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -93,10 +98,48 @@ def render_paragraph(token, base_dir, client=None, page_id=None, uploaded=None, 
 
 
 def _render_image_block(token, base_dir, client=None, page_id=None, uploaded=None):
-    """Placeholder; task 5 replaces this with a real mediaSingle node."""
+    """Render a standalone image as an ADF mediaSingle node."""
     src = token.get("attrs", {}).get("src", "")
     alt = token.get("attrs", {}).get("alt", "") or src
+    if not src:
+        return []
+
+    if client and page_id:
+        img_path = resolve_image_path(src, base_dir)
+        if img_path.exists():
+            info = client.ensure_attachment(page_id, str(img_path), uploaded)
+            node = _media_single(info, alt)
+            if node:
+                return [node]
+
     return [{"type": "paragraph", "content": [_text(f"[image: {alt}]")]}]
+
+
+def _media_single(info, alt=""):
+    """Build an ADF mediaSingle node from attachment media info.
+
+    Returns None if the media_id or collection is missing (unexpected API
+    response), so the caller can fall back to a placeholder.
+    """
+    media_id = info.get("media_id")
+    collection = info.get("collection")
+    if not media_id or not collection:
+        return None
+    return {
+        "type": "mediaSingle",
+        "attrs": {"layout": "center"},
+        "content": [
+            {
+                "type": "media",
+                "attrs": {
+                    "id": media_id,
+                    "type": "file",
+                    "collection": collection,
+                    "alt": alt,
+                },
+            }
+        ],
+    }
 
 
 def render_block_code(token, base_dir, **kw):
@@ -258,10 +301,20 @@ def render_inline(children, base_dir, **kw):
                 nodes.extend(_add_mark(inner, _mark("link", href=url)))
 
         elif t == "image":
-            # Inline image placeholder (task 5 handles real uploads)
-            alt = child.get("attrs", {}).get("alt", "")
             src = child.get("attrs", {}).get("src", "")
-            nodes.append(_text(f"[image: {alt or src}]"))
+            alt = child.get("attrs", {}).get("alt", "") or src
+            client = kw.get("client")
+            page_id = kw.get("page_id")
+            uploaded = kw.get("uploaded")
+            if client and page_id and src:
+                img_path = resolve_image_path(src, base_dir)
+                if img_path.exists():
+                    info = client.ensure_attachment(page_id, str(img_path), uploaded)
+                    node = _media_single(info, alt)
+                    if node:
+                        nodes.append(node)
+                        continue
+            nodes.append(_text(f"[image: {alt}]"))
 
         elif t == "softbreak":
             nodes.append(_text(" "))
