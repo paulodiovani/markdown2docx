@@ -127,7 +127,7 @@ def _media_single(info, alt=""):
         return None
     return {
         "type": "mediaSingle",
-        "attrs": {"layout": "center"},
+        "attrs": {"layout": "center", "width": 100, "widthType": "percentage"},
         "content": [
             {
                 "type": "media",
