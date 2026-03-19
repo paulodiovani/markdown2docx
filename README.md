@@ -37,10 +37,10 @@ For Mermaid diagram support:
 npm install -g @mermaid-js/mermaid-cli
 ```
 
-To install both tools as executables under `~/.local/bin`:
+To build and install both tools as executables under `~/.local/bin`:
 
 ```bash
-make install
+make clean install
 ```
 
 ## Usage
