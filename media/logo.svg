@@ -109,7 +109,7 @@
     <rect x="114" y="220" width="50" height="30" rx="5" fill="#2b579a"/>
     <text x="139" y="241" text-anchor="middle"
       font-family="'SF Mono','Fira Code','Consolas',monospace"
-      font-weight="800" font-size="13" fill="#ffffff" letter-spacing="0.5">DOCX</text>
+      font-weight="800" font-size="16" fill="#ffffff" letter-spacing="1">DOC</text>
   </g>
 
   <!-- Eject arrows -->

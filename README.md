@@ -1,8 +1,13 @@
-# markdown2docx / markdown2confluence
+# markdown2document
 
-Convert GitHub Flavored Markdown files to DOCX or Confluence pages.
+Convert GitHub Flavored Markdown files to other document formats.
 
 ![logo](media/logo.svg)
+
+Supported formats:
+
+- **DOCX** via `markdown2docx`
+- **Confluence** via `markdown2confluence`
 
 ## Features
 
