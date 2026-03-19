@@ -26,7 +26,7 @@ from pygments.token import (
 )
 
 from lib.alerts import ALERT_STYLES, preprocess_alerts
-from lib.mermaid import preprocess_mermaid
+from lib.mermaid import MERMAID_THEMES, preprocess_mermaid
 from lib.parser import (
     create_parser,
     extract_text,
@@ -519,7 +519,7 @@ def render_inline(
 # ---------------------------------------------------------------------------
 
 
-def convert_file(input_path, output_dir):
+def convert_file(input_path, output_dir, theme=None):
     """Read MD, parse to AST, preprocess mermaid, render DOCX, save."""
     input_path = Path(input_path)
     output_dir = Path(output_dir)
@@ -533,7 +533,7 @@ def convert_file(input_path, output_dir):
     tokens = md(md_text)
 
     # Preprocess mermaid diagrams
-    tokens = preprocess_mermaid(tokens, base_dir)
+    tokens = preprocess_mermaid(tokens, base_dir, theme=theme)
 
     # Preprocess GitHub-style alerts
     tokens = preprocess_alerts(tokens)
@@ -565,10 +565,16 @@ def convert_file(input_path, output_dir):
     type=click.Path(),
     help="Output directory (default: ./output)",
 )
-def main(files, output):
+@click.option(
+    "--theme",
+    type=click.Choice(MERMAID_THEMES),
+    default=None,
+    help="Mermaid diagram theme.",
+)
+def main(files, output, theme):
     """Convert one or more Markdown files to DOCX format."""
     for f in files:
-        out = convert_file(f, output)
+        out = convert_file(f, output, theme=theme)
         click.echo(f"Converted: {f} -> {out}")
 
 
