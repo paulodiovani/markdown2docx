@@ -39,6 +39,12 @@ def preprocess_mermaid(tokens, base_dir, theme=None):
                     str(png_path),
                     "-b",
                     "transparent",
+                    "-w",
+                    "1024",
+                    "-H",
+                    "768",
+                    "-s",
+                    "2",
                 ]
                 if theme:
                     cmd.extend(["-t", theme])
