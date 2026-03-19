@@ -1,5 +1,6 @@
 """markdown2confluence -- Convert GitHub Flavored Markdown files to Confluence pages."""
 
+import json
 from collections import defaultdict
 from pathlib import Path
 
@@ -338,9 +339,40 @@ def render_inline(children, base_dir, **kw):
     return nodes
 
 
+_SHORT_SELECTION = 20
+_CONTEXT_CHARS = 30
+
+
 # ---------------------------------------------------------------------------
 # Inline comment re-injection
 # ---------------------------------------------------------------------------
+
+
+def _extract_comment_text(comment):
+    """Extract plain text from a comment's ADF body."""
+    body = comment.get("body", {}).get("atlas_doc_format", {}).get("value", "")
+    if not body:
+        return ""
+    try:
+        adf = json.loads(body)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    parts = []
+
+    def _walk(node):
+        if isinstance(node, dict):
+            if node.get("type") == "text":
+                parts.append(node.get("text", ""))
+            for child in node.get("content", []):
+                _walk(child)
+
+    _walk(adf)
+    return "".join(parts)
+
+
+def _truncate(text, max_len=50):
+    """Truncate text with ellipsis."""
+    return text[:max_len] + "…" if len(text) > max_len else text
 
 
 def reapply_comment_marks(new_adf, old_adf, comments):
@@ -368,12 +400,15 @@ def reapply_comment_marks(new_adf, old_adf, comments):
     # Fallback source: inlineOriginalSelection from the comments API, used for
     # any UUID that appears in open comments but is already dangling in old ADF.
     api_selections = {}
+    comment_texts = {}
     for c in comments:
         props = c.get("properties", {})
         ref = props.get("inlineMarkerRef")
         sel = props.get("inlineOriginalSelection")
         if ref and sel:
             api_selections[ref] = sel
+        if ref:
+            comment_texts[ref] = _extract_comment_text(c)
 
     if not old_annotations and not api_selections:
         return new_adf
@@ -387,43 +422,67 @@ def reapply_comment_marks(new_adf, old_adf, comments):
     for uuid, info in old_annotations.items():
         selection = info["selection"]
         anchor = info["anchor_block"]
+        context = info.get("context", ("", ""))
         if not selection:
             continue
-        _apply_expanding_search(
-            text_nodes, global_text, uuid, selection, anchor, applied
+        result = _apply_expanding_search(
+            text_nodes,
+            global_text,
+            uuid,
+            selection,
+            anchor,
+            applied,
+            context=context,
         )
+        if result["matched"]:
+            delta = result["new_block"] - anchor
+            if delta != 0:
+                direction = "down" if delta > 0 else "up"
+                click.echo(
+                    f'  Comment on "{_truncate(selection)}" '
+                    f"re-anchored (moved {abs(delta)} blocks {direction})",
+                    err=True,
+                )
 
-    # Warn about open comments that were already dangling in old ADF body
-    # (no structural anchor available — skipping to avoid false placement).
+    # Warn about open comments that could not be re-anchored.
     for uuid, sel in api_selections.items():
         if uuid not in applied:
-            preview = sel[:40] + "…" if len(sel) > 40 else sel
+            preview = _truncate(sel)
+            body = _truncate(comment_texts.get(uuid, ""))
             if uuid not in old_annotations:
                 click.echo(
-                    f'  Warning: inline comment on "{preview}" was already '
-                    f"dangling before this update — skipping re-anchor.",
+                    f'  Warning: comment on "{preview}" was already '
+                    f"dangling before this update — skipping.",
                     err=True,
                 )
             else:
                 click.echo(
-                    f'  Warning: inline comment on "{preview}" could not be '
-                    f"re-anchored (text deleted).",
+                    f'  Warning: comment on "{preview}" could not be '
+                    f"re-anchored (text not found).",
                     err=True,
                 )
+            if body:
+                click.echo(f'           Comment: "{body}"', err=True)
 
     return new_adf
 
 
 def _extract_annotations_from_adf(adf_doc):
-    """Return ``{uuid: {"anchor_block": int, "selection": str}}`` from old ADF.
+    """Return ``{uuid: {"anchor_block", "selection", "context"}}`` from old ADF.
 
     Walks every text node collecting annotation marks.  Texts from multiple
     nodes (including cross-block spans) are concatenated in document order to
     reconstruct the full selection string.
+
+    For short selections (≤ _SHORT_SELECTION chars), ``context`` is a
+    ``(prefix, suffix)`` tuple of surrounding text from the old ADF.
+    For longer selections it is ``("", "")``.
     """
+    blocks = adf_doc.get("content", []) if adf_doc else []
+
     # Collect (uuid, block_idx, text) tuples in document order via DFS.
     entries = []
-    for block_idx, block in enumerate(adf_doc.get("content", []) if adf_doc else []):
+    for block_idx, block in enumerate(blocks):
         _collect_annotated_texts(block, block_idx, entries)
 
     # Group by UUID preserving insertion order.
@@ -432,13 +491,28 @@ def _extract_annotations_from_adf(adf_doc):
         groups[uuid]["block_indices"].append(block_idx)
         groups[uuid]["texts"].append(text)
 
-    return {
-        uuid: {
-            "anchor_block": info["block_indices"][0],
-            "selection": "".join(info["texts"]),
+    # Build old global text map for context extraction.
+    old_text_nodes, old_global = _build_global_text_map(blocks)
+
+    result = {}
+    for uuid, info in groups.items():
+        selection = "".join(info["texts"])
+        anchor = info["block_indices"][0]
+        context = ("", "")
+        if len(selection) <= _SHORT_SELECTION and old_global:
+            idx = old_global.find(selection)
+            if idx != -1:
+                prefix = old_global[max(0, idx - _CONTEXT_CHARS) : idx]
+                suffix = old_global[
+                    idx + len(selection) : idx + len(selection) + _CONTEXT_CHARS
+                ]
+                context = (prefix, suffix)
+        result[uuid] = {
+            "anchor_block": anchor,
+            "selection": selection,
+            "context": context,
         }
-        for uuid, info in groups.items()
-    }
+    return result
 
 
 def _collect_annotated_texts(node, block_idx, entries):
@@ -479,18 +553,59 @@ def _build_global_text_map(blocks):
     return text_nodes, global_text
 
 
+def _context_matches(global_text, idx, selection, context):
+    """Check if surrounding text at *idx* matches the expected context.
+
+    For short selections, at least half the prefix/suffix characters must match
+    the text surrounding the candidate position.  This tolerates light edits
+    while preventing false matches on common words.
+    """
+    prefix, suffix = context
+    if not prefix and not suffix:
+        return True
+
+    score = 0
+    total = 0
+
+    if prefix:
+        actual_prefix = global_text[max(0, idx - len(prefix)) : idx]
+        total += len(prefix)
+        # Count matching chars from the end (closest to selection)
+        for a, b in zip(reversed(actual_prefix), reversed(prefix)):
+            if a == b:
+                score += 1
+
+    if suffix:
+        sel_end = idx + len(selection)
+        actual_suffix = global_text[sel_end : sel_end + len(suffix)]
+        total += len(suffix)
+        # Count matching chars from the start (closest to selection)
+        for a, b in zip(actual_suffix, suffix):
+            if a == b:
+                score += 1
+
+    return total > 0 and score >= total / 2
+
+
 def _apply_expanding_search(
-    text_nodes, global_text, uuid, selection, anchor_block, applied
+    text_nodes, global_text, uuid, selection, anchor_block, applied, context=None
 ):
     """Search for *selection* expanding outward from *anchor_block* block by block.
 
     Tries window sizes 0, 1, 2, … up to the full document extent.  The first
     match found is the one closest to the original position, so duplicate text
     elsewhere in the document is never preferred over a nearby occurrence.
-    Cross-block selections are handled naturally via the shared global text map.
+
+    For short selections (≤ _SHORT_SELECTION chars) with *context*, candidate
+    matches are verified against surrounding text before being accepted.
+
+    Returns a dict ``{"matched": bool, "new_block": int}`` or
+    ``{"matched": False}`` on failure.
     """
     if not text_nodes:
-        return False
+        return {"matched": False}
+
+    need_context = len(selection) <= _SHORT_SELECTION and context and any(context)
 
     max_block = max(n[1] for n in text_nodes)
     max_window = max(anchor_block, max_block - anchor_block)
@@ -511,11 +626,27 @@ def _apply_expanding_search(
             continue
         prev_start, prev_end = win_start, win_end
 
-        idx = global_text.find(selection, win_start, win_end)
-        if idx != -1:
-            return _apply_mark_at(text_nodes, uuid, idx, idx + len(selection), applied)
+        # Search for all occurrences within this window.
+        search_start = win_start
+        while True:
+            idx = global_text.find(selection, search_start, win_end)
+            if idx == -1:
+                break
+            if need_context and not _context_matches(
+                global_text, idx, selection, context
+            ):
+                search_start = idx + 1
+                continue
+            _apply_mark_at(text_nodes, uuid, idx, idx + len(selection), applied)
+            # Find which block the match landed in.
+            new_block = anchor_block
+            for _, blk, start, end in text_nodes:
+                if end > idx and start <= idx:
+                    new_block = blk
+                    break
+            return {"matched": True, "new_block": new_block}
 
-    return False
+    return {"matched": False}
 
 
 def _apply_mark_at(text_nodes, uuid, sel_start, sel_end, applied):
@@ -552,7 +683,13 @@ def extract_title(tokens, fallback):
 
 
 def convert_file(
-    input_path, client, page_id=None, parent_id=None, space_key=None, theme=None
+    input_path,
+    client,
+    page_id=None,
+    parent_id=None,
+    space_key=None,
+    theme=None,
+    dry_run=False,
 ):
     """Parse MD, render to ADF, re-apply comment marks, then create/update page."""
     input_path = Path(input_path)
@@ -575,8 +712,8 @@ def convert_file(
         adf_doc = render_to_adf(
             tokens,
             base_dir,
-            client=client,
-            page_id=page_id,
+            client=client if not dry_run else None,
+            page_id=page_id if not dry_run else None,
             uploaded=existing_attachments,
         )
 
@@ -585,9 +722,16 @@ def convert_file(
         comments = client.get_inline_comments(page_id)
         adf_doc = reapply_comment_marks(adf_doc, old_adf, comments)
 
+        if dry_run:
+            return client.page_url(page)
+
         result = client.update_page(page_id, version, title, adf_doc)
     else:
         title = extract_title(tokens, input_path.stem)
+
+        if dry_run:
+            return None
+
         # Create an empty page first so we have a page_id for attachment uploads
         result = client.create_page(parent_id, space_key, title)
         target_page_id = result["id"]
@@ -634,7 +778,13 @@ def convert_file(
     default=None,
     help="Mermaid diagram theme.",
 )
-def main(files, page_id, parent_id, space_key, theme):
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Parse and render without creating or updating pages.",
+)
+def main(files, page_id, parent_id, space_key, theme, dry_run):
     """Convert one or more Markdown files to Confluence pages."""
     if not page_id and not parent_id:
         raise click.UsageError("One of --page-id or --parent-id is required.")
@@ -651,8 +801,13 @@ def main(files, page_id, parent_id, space_key, theme):
             parent_id=parent_id,
             space_key=space_key,
             theme=theme,
+            dry_run=dry_run,
         )
-        click.echo(f"Published: {f} -> {url}")
+        prefix = "Dry run" if dry_run else "Published"
+        if url:
+            click.echo(f"{prefix}: {f} -> {url}")
+        else:
+            click.echo(f"{prefix}: {f}")
 
 
 if __name__ == "__main__":
