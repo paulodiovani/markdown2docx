@@ -159,12 +159,25 @@ def render_block_quote(token, base_dir, **kw):
     return [{"type": "blockquote", "content": content}]
 
 
+_ALERT_TO_PANEL = {
+    "NOTE": "info",
+    "TIP": "success",
+    "IMPORTANT": "note",
+    "WARNING": "warning",
+    "CAUTION": "error",
+}
+
+
 def render_alert(token, base_dir, **kw):
-    """Placeholder; task 7 replaces this with a Confluence panel extension."""
+    """Render a GitHub-style alert as a Confluence ADF panel node."""
+    alert_type = (token.get("attrs") or {}).get("alert_type", "NOTE")
+    panel_type = _ALERT_TO_PANEL.get(alert_type, "info")
     content = []
     for child in token.get("children", []):
         content.extend(render_block(child, base_dir, **kw))
-    return [{"type": "blockquote", "content": content}]
+    if not content:
+        content = [{"type": "paragraph", "content": [_text("")]}]
+    return [{"type": "panel", "attrs": {"panelType": panel_type}, "content": content}]
 
 
 def render_list(token, base_dir, **kw):
