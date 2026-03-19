@@ -1,12 +1,8 @@
 """markdown2docx -- Convert GitHub Flavored Markdown files to DOCX format."""
 
-import os
-import subprocess
-import tempfile
 from pathlib import Path
 
 import click
-import mistune
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
@@ -29,26 +25,24 @@ from pygments.token import (
     Token,
 )
 
+from lib.alerts import ALERT_STYLES, preprocess_alerts
+from lib.mermaid import preprocess_mermaid
+from lib.parser import (
+    create_parser,
+    extract_text,
+    preprocess_images,
+    resolve_image_path,
+)
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-TEMP_DIR = Path(tempfile.gettempdir()) / "markdown2docx"
 
 CODE_FONT = "Courier New"
 CODE_FONT_SIZE = Pt(9)
 CODE_BG_COLOR = "F2F2F2"
 MAX_IMAGE_WIDTH = Inches(6)
 MAX_IMAGE_HEIGHT = Inches(8)
-
-# Alert type -> (border_color, background_color, label_text, text_color)
-ALERT_STYLES = {
-    "NOTE": ("4493F8", "DBEAFE", "Note", "4493F8"),
-    "TIP": ("3FB950", "DCFCE7", "Tip", "3FB950"),
-    "IMPORTANT": ("AB7DF8", "F3E8FF", "Important", "AB7DF8"),
-    "WARNING": ("D29922", "FEF9C3", "Warning", "D29922"),
-    "CAUTION": ("F85149", "FEE2E2", "Caution", "F85149"),
-}
 
 # Pygments token type -> (hex_color, bold, italic)
 TOKEN_STYLES = {
@@ -83,21 +77,6 @@ TOKEN_STYLES = {
 # ---------------------------------------------------------------------------
 
 
-def extract_text(children):
-    """Recursively extract plain text from token children."""
-    if children is None:
-        return ""
-    parts = []
-    for child in children:
-        if child.get("raw"):
-            parts.append(child["raw"])
-        elif child.get("text"):
-            parts.append(child["text"])
-        elif child.get("children"):
-            parts.append(extract_text(child["children"]))
-    return "".join(parts)
-
-
 def get_token_style(token_type):
     """Walk Pygments token hierarchy to find matching style."""
     t = token_type
@@ -106,13 +85,6 @@ def get_token_style(token_type):
             return TOKEN_STYLES[t]
         t = t.parent
     return None
-
-
-def resolve_image_path(url, base_dir):
-    """Resolve image path relative to base_dir or as absolute."""
-    if os.path.isabs(url):
-        return Path(url)
-    return Path(base_dir) / url
 
 
 def calculate_image_dimensions(img_path, max_width, max_height):
@@ -127,44 +99,6 @@ def calculate_image_dimensions(img_path, max_width, max_height):
         height = max_height
         width = int(max_height * aspect_ratio)
     return width, height
-
-
-def detect_alert_type(token):
-    """Check if a block_quote token is a GitHub-style alert.
-
-    Returns the alert type string (e.g. "NOTE") or None.
-    Mistune splits [!NOTE] into two text nodes: "[" and "!NOTE]".
-    """
-    children = token.get("children", [])
-    if not children:
-        return None
-
-    first_child = children[0]
-    if first_child.get("type") != "paragraph":
-        return None
-
-    inlines = first_child.get("children", [])
-    if len(inlines) < 2:
-        return None
-
-    first_inline = inlines[0]
-    second_inline = inlines[1]
-
-    if first_inline.get("type") != "text" or second_inline.get("type") != "text":
-        return None
-
-    first_raw = first_inline.get("raw", "") or first_inline.get("text", "")
-    second_raw = second_inline.get("raw", "") or second_inline.get("text", "")
-
-    if first_raw != "[":
-        return None
-
-    if second_raw.startswith("!") and second_raw.endswith("]"):
-        alert_type = second_raw[1:-1].upper()
-        if alert_type in ALERT_STYLES:
-            return alert_type
-
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -581,116 +515,6 @@ def render_inline(
 
 
 # ---------------------------------------------------------------------------
-# Mermaid preprocessing
-# ---------------------------------------------------------------------------
-
-
-def preprocess_mermaid(tokens, base_dir):
-    """Scan AST for mermaid code blocks and replace with image paragraphs."""
-    TEMP_DIR.mkdir(parents=True, exist_ok=True)
-    result = []
-
-    for token in tokens:
-        if token["type"] == "block_code":
-            info = token.get("attrs", {}).get("info", "") if token.get("attrs") else ""
-            lang = info.split()[0] if info else ""
-
-            if lang == "mermaid":
-                raw = token.get("raw", "") or token.get("text", "")
-                mmd_path = TEMP_DIR / f"diagram_{id(token)}.mmd"
-                png_path = TEMP_DIR / f"diagram_{id(token)}.png"
-
-                mmd_path.write_text(raw)
-                subprocess.run(
-                    ["mmdc", "-i", str(mmd_path), "-o", str(png_path)],
-                    check=True,
-                )
-
-                # Replace with an image paragraph token
-                result.append(
-                    {
-                        "type": "paragraph",
-                        "children": [
-                            {
-                                "type": "image",
-                                "attrs": {
-                                    "src": str(png_path),
-                                    "alt": "mermaid diagram",
-                                },
-                            }
-                        ],
-                    }
-                )
-                continue
-
-        result.append(token)
-
-    return result
-
-
-def preprocess_alerts(tokens):
-    """Scan AST for GitHub-style alerts in blockquotes and replace with alert tokens."""
-    result = []
-
-    for token in tokens:
-        if token["type"] == "block_quote":
-            alert_type = detect_alert_type(token)
-            if alert_type:
-                children = token.get("children", [])
-
-                # Strip the [!TYPE] marker from the first paragraph's inlines
-                if children and children[0].get("type") == "paragraph":
-                    first_para = children[0]
-                    inlines = first_para.get("children", [])
-
-                    # Remove the "[" and "!TYPE]" text nodes (first two inlines)
-                    stripped = inlines[2:]
-
-                    # Remove leading softbreak if present
-                    if stripped and stripped[0].get("type") == "softbreak":
-                        stripped = stripped[1:]
-
-                    if stripped:
-                        # Keep the first paragraph with remaining inlines
-                        body_children = [
-                            {"type": "paragraph", "children": stripped}
-                        ] + [c for c in children[1:] if c.get("type") != "blank_line"]
-                    else:
-                        # First paragraph had only the marker; use remaining children
-                        body_children = [
-                            c for c in children[1:] if c.get("type") != "blank_line"
-                        ]
-                else:
-                    body_children = children
-
-                result.append(
-                    {
-                        "type": "alert",
-                        "attrs": {"alert_type": alert_type},
-                        "children": body_children,
-                    }
-                )
-                continue
-
-        result.append(token)
-
-    return result
-
-
-def preprocess_images(tokens):
-    """Normalize image attrs: rename 'url' to 'src' so all images use the same key."""
-    for token in tokens:
-        children = token.get("children", [])
-        if children:
-            for child in children:
-                if child.get("type") == "image":
-                    attrs = child.get("attrs", {})
-                    if attrs and "url" in attrs:
-                        attrs["src"] = attrs.pop("url")
-    return tokens
-
-
-# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -705,10 +529,7 @@ def convert_file(input_path, output_dir):
     base_dir = str(input_path.parent)
 
     # Parse to AST with GFM plugins
-    md = mistune.create_markdown(
-        renderer="ast",
-        plugins=["table", "strikethrough", "task_lists"],
-    )
+    md = create_parser()
     tokens = md(md_text)
 
     # Preprocess mermaid diagrams

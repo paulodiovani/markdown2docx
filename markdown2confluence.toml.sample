@@ -1,0 +1,10 @@
+# Confluence credentials
+# Copy this file to markdown2confluence.toml (current directory)
+# or ~/.config/markdown2confluence/config.toml (user config)
+
+# Your Atlassian account email
+email = ""
+# API token from https://id.atlassian.com/manage-profile/security/api-tokens
+api_token = ""
+# Confluence base URL, e.g. https://yourorg.atlassian.net
+url = ""
