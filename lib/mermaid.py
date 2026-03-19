@@ -1,5 +1,6 @@
 """Mermaid diagram preprocessing -- renders mermaid code blocks to PNG via mmdc."""
 
+import hashlib
 import subprocess
 import tempfile
 from pathlib import Path
@@ -11,6 +12,7 @@ def preprocess_mermaid(tokens, base_dir):
     """Scan AST for mermaid code blocks and replace with image paragraph tokens."""
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
     result = []
+    diagram_index = 0
 
     for token in tokens:
         if token["type"] == "block_code":
@@ -19,8 +21,11 @@ def preprocess_mermaid(tokens, base_dir):
 
             if lang == "mermaid":
                 raw = token.get("raw", "") or token.get("text", "")
-                mmd_path = TEMP_DIR / f"diagram_{id(token)}.mmd"
-                png_path = TEMP_DIR / f"diagram_{id(token)}.png"
+                digest = hashlib.md5(raw.encode()).hexdigest()[:10]
+                name = f"mermaid_{diagram_index}_{digest}"
+                diagram_index += 1
+                mmd_path = TEMP_DIR / f"{name}.mmd"
+                png_path = TEMP_DIR / f"{name}.png"
 
                 mmd_path.write_text(raw)
                 subprocess.run(
