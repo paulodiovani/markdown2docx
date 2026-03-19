@@ -127,7 +127,11 @@ class ConfluenceClient:
         url = f"{self.base_url}/wiki/api/v2/pages/{page_id}/inline-comments"
         resp = requests.get(
             url,
-            params={"status": "current", "resolution-status": "open"},
+            params={
+                "status": "current",
+                "resolution-status": "open",
+                "body-format": "atlas_doc_format",
+            },
             auth=self.auth,
         )
         resp.raise_for_status()
