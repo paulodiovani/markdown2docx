@@ -683,7 +683,13 @@ def extract_title(tokens, fallback):
 
 
 def convert_file(
-    input_path, client, page_id=None, parent_id=None, space_key=None, theme=None
+    input_path,
+    client,
+    page_id=None,
+    parent_id=None,
+    space_key=None,
+    theme=None,
+    dry_run=False,
 ):
     """Parse MD, render to ADF, re-apply comment marks, then create/update page."""
     input_path = Path(input_path)
@@ -706,8 +712,8 @@ def convert_file(
         adf_doc = render_to_adf(
             tokens,
             base_dir,
-            client=client,
-            page_id=page_id,
+            client=client if not dry_run else None,
+            page_id=page_id if not dry_run else None,
             uploaded=existing_attachments,
         )
 
@@ -716,9 +722,16 @@ def convert_file(
         comments = client.get_inline_comments(page_id)
         adf_doc = reapply_comment_marks(adf_doc, old_adf, comments)
 
+        if dry_run:
+            return client.page_url(page)
+
         result = client.update_page(page_id, version, title, adf_doc)
     else:
         title = extract_title(tokens, input_path.stem)
+
+        if dry_run:
+            return None
+
         # Create an empty page first so we have a page_id for attachment uploads
         result = client.create_page(parent_id, space_key, title)
         target_page_id = result["id"]
@@ -765,7 +778,13 @@ def convert_file(
     default=None,
     help="Mermaid diagram theme.",
 )
-def main(files, page_id, parent_id, space_key, theme):
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Parse and render without creating or updating pages.",
+)
+def main(files, page_id, parent_id, space_key, theme, dry_run):
     """Convert one or more Markdown files to Confluence pages."""
     if not page_id and not parent_id:
         raise click.UsageError("One of --page-id or --parent-id is required.")
@@ -782,8 +801,13 @@ def main(files, page_id, parent_id, space_key, theme):
             parent_id=parent_id,
             space_key=space_key,
             theme=theme,
+            dry_run=dry_run,
         )
-        click.echo(f"Published: {f} -> {url}")
+        prefix = "Dry run" if dry_run else "Published"
+        if url:
+            click.echo(f"{prefix}: {f} -> {url}")
+        else:
+            click.echo(f"{prefix}: {f}")
 
 
 if __name__ == "__main__":
