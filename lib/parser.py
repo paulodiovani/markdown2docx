@@ -1,6 +1,7 @@
 """Shared Markdown parsing utilities."""
 
 import os
+import re
 from pathlib import Path
 
 import mistune
@@ -19,6 +20,31 @@ def extract_text(children):
         elif child.get("children"):
             parts.append(extract_text(child["children"]))
     return "".join(parts)
+
+
+def heading_slug(text):
+    """Convert heading text to a URL-compatible slug (GitHub anchor convention)."""
+    slug = text.lower()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    slug = re.sub(r"[\s]+", "-", slug)
+    return slug
+
+
+def confluence_heading_anchor(text):
+    """Convert heading text to Confluence's anchor format."""
+    return re.sub(r"\s+", "-", text.strip())
+
+
+def build_heading_anchor_map(tokens):
+    """Build a mapping from GitHub-style slugs to Confluence-style anchors."""
+    anchor_map = {}
+    for token in tokens:
+        if token.get("type") == "heading":
+            text = extract_text(token.get("children", []))
+            slug = heading_slug(text)
+            anchor = confluence_heading_anchor(text)
+            anchor_map[slug] = anchor
+    return anchor_map
 
 
 def resolve_image_path(url, base_dir):

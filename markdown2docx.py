@@ -30,6 +30,7 @@ from lib.mermaid import MERMAID_THEMES, preprocess_mermaid
 from lib.parser import (
     create_parser,
     extract_text,
+    heading_slug,
     preprocess_images,
     resolve_image_path,
 )
@@ -43,6 +44,8 @@ CODE_FONT_SIZE = Pt(9)
 CODE_BG_COLOR = "F2F2F2"
 MAX_IMAGE_WIDTH = Inches(6)
 MAX_IMAGE_HEIGHT = Inches(8)
+
+_bookmark_id_counter = 0
 
 # Pygments token type -> (hex_color, bold, italic)
 TOKEN_STYLES = {
@@ -150,6 +153,33 @@ def add_hyperlink(paragraph, url, text):
     paragraph._p.append(hyperlink)
 
 
+def add_internal_hyperlink(paragraph, anchor, text):
+    """Add a hyperlink to a bookmark within the same document."""
+    hyperlink = OxmlElement("w:hyperlink")
+    hyperlink.set(qn("w:anchor"), anchor)
+
+    run_elem = OxmlElement("w:r")
+    rPr = OxmlElement("w:rPr")
+
+    color = OxmlElement("w:color")
+    color.set(qn("w:val"), "0563C1")
+    rPr.append(color)
+
+    underline = OxmlElement("w:u")
+    underline.set(qn("w:val"), "single")
+    rPr.append(underline)
+
+    run_elem.append(rPr)
+
+    text_elem = OxmlElement("w:t")
+    text_elem.set(qn("xml:space"), "preserve")
+    text_elem.text = text
+    run_elem.append(text_elem)
+
+    hyperlink.append(run_elem)
+    paragraph._p.append(hyperlink)
+
+
 def add_image(doc, url, base_dir):
     """Resolve image path and add picture to document, scaled to fit page."""
     img_path = resolve_image_path(url, base_dir)
@@ -196,9 +226,25 @@ def render_block(doc, token, base_dir):
 
 def render_heading(doc, token, base_dir):
     """Render a heading token."""
+    global _bookmark_id_counter
     level = token.get("attrs", {}).get("level", 1) if token.get("attrs") else 1
     heading = doc.add_heading(level=level)
     render_inline(heading, token.get("children", []), base_dir)
+
+    # Add a bookmark so internal links can target this heading
+    text = extract_text(token.get("children", []))
+    bookmark_name = heading_slug(text)
+    _bookmark_id_counter += 1
+    bid = str(_bookmark_id_counter)
+
+    bookmark_start = OxmlElement("w:bookmarkStart")
+    bookmark_start.set(qn("w:id"), bid)
+    bookmark_start.set(qn("w:name"), bookmark_name)
+    heading._p.insert(0, bookmark_start)
+
+    bookmark_end = OxmlElement("w:bookmarkEnd")
+    bookmark_end.set(qn("w:id"), bid)
+    heading._p.append(bookmark_end)
 
 
 def render_paragraph(doc, token, base_dir):
@@ -498,7 +544,9 @@ def render_inline(
             attrs = child.get("attrs", {}) or {}
             url = attrs.get("url", "") or attrs.get("href", "")
             link_text = extract_text(child.get("children", []))
-            if url:
+            if url and url.startswith("#"):
+                add_internal_hyperlink(paragraph, url[1:], link_text)
+            elif url:
                 add_hyperlink(paragraph, url, link_text)
 
         elif t == "image":
