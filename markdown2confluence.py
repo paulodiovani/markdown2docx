@@ -10,6 +10,7 @@ from lib.alerts import preprocess_alerts
 from lib.confluence import ConfluenceClient
 from lib.mermaid import MERMAID_THEMES, preprocess_mermaid
 from lib.parser import (
+    build_heading_anchor_map,
     create_parser,
     extract_text,
     preprocess_images,
@@ -311,7 +312,12 @@ def render_inline(children, base_dir, **kw):
             attrs = child.get("attrs", {}) or {}
             url = attrs.get("url", "") or attrs.get("href", "")
             inner = render_inline(child.get("children", []), base_dir, **kw)
-            if url:
+            if url and url.startswith("#"):
+                anchor_map = kw.get("anchor_map", {})
+                slug = url[1:]
+                anchor = anchor_map.get(slug, slug)
+                nodes.extend(_add_mark(inner, _mark("link", href="#" + anchor)))
+            elif url:
                 nodes.extend(_add_mark(inner, _mark("link", href=url)))
 
         elif t == "image":
@@ -701,6 +707,7 @@ def convert_file(
     tokens = preprocess_mermaid(tokens, base_dir, theme=theme)
     tokens = preprocess_alerts(tokens)
     tokens = preprocess_images(tokens)
+    anchor_map = build_heading_anchor_map(tokens)
 
     if page_id:
         page = client.get_page(page_id)
@@ -715,6 +722,7 @@ def convert_file(
             client=client if not dry_run else None,
             page_id=page_id if not dry_run else None,
             uploaded=existing_attachments,
+            anchor_map=anchor_map,
         )
 
         # Re-apply annotation marks: use old ADF for structural anchoring,
@@ -742,6 +750,7 @@ def convert_file(
             client=client,
             page_id=target_page_id,
             uploaded={},
+            anchor_map=anchor_map,
         )
         result = client.update_page(
             target_page_id, result["version"]["number"], title, adf_doc
