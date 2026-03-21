@@ -1,10 +1,11 @@
 # Changelog
 
-## 2026.3.20 (882a0e0)
+## 2026.3.20 (e036a09)
 
 ### Fixed
 
 - Fix internal links in DOCX (bookmark anchors on headings) and Confluence (case-sensitive heading anchors)
+- Fix Confluence anchor lookup for headings containing em-dashes (e.g. "Appendix B — Current Systems")
 
 ## 2026.3.19 (3ba687b)
 

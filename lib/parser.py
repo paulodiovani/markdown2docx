@@ -26,7 +26,7 @@ def heading_slug(text):
     """Convert heading text to a URL-compatible slug (GitHub anchor convention)."""
     slug = text.lower()
     slug = re.sub(r"[^\w\s-]", "", slug)
-    slug = re.sub(r"[\s]+", "-", slug)
+    slug = re.sub(r"\s", "-", slug)
     return slug
 
 
