@@ -9,6 +9,8 @@ You can also combine **bold and *nested italic*** together.
 
 Visit [GitHub](https://github.com) for more info.
 
+See the [Code Blocks](#code-blocks) section below, or jump to [Tables](#tables) for data examples.
+
 ## Headings
 
 ### Third Level
