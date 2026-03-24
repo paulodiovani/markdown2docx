@@ -567,7 +567,7 @@ def render_inline(
 # ---------------------------------------------------------------------------
 
 
-def convert_file(input_path, output_dir, theme=None):
+def convert_file(input_path, output_dir, theme=None, transparent_bg=False):
     """Read MD, parse to AST, preprocess mermaid, render DOCX, save."""
     input_path = Path(input_path)
     output_dir = Path(output_dir)
@@ -581,7 +581,9 @@ def convert_file(input_path, output_dir, theme=None):
     tokens = md(md_text)
 
     # Preprocess mermaid diagrams
-    tokens = preprocess_mermaid(tokens, base_dir, theme=theme)
+    tokens = preprocess_mermaid(
+        tokens, base_dir, theme=theme, transparent_bg=transparent_bg
+    )
 
     # Preprocess GitHub-style alerts
     tokens = preprocess_alerts(tokens)
@@ -619,10 +621,16 @@ def convert_file(input_path, output_dir, theme=None):
     default=None,
     help="Mermaid diagram theme.",
 )
-def main(files, output, theme):
+@click.option(
+    "--transparent",
+    is_flag=True,
+    default=False,
+    help="Use transparent background for Mermaid diagrams.",
+)
+def main(files, output, theme, transparent):
     """Convert one or more Markdown files to DOCX format."""
     for f in files:
-        out = convert_file(f, output, theme=theme)
+        out = convert_file(f, output, theme=theme, transparent_bg=transparent)
         click.echo(f"Converted: {f} -> {out}")
 
 

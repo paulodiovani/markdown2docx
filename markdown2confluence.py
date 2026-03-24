@@ -695,6 +695,7 @@ def convert_file(
     parent_id=None,
     space_key=None,
     theme=None,
+    transparent_bg=False,
     dry_run=False,
 ):
     """Parse MD, render to ADF, re-apply comment marks, then create/update page."""
@@ -704,7 +705,9 @@ def convert_file(
 
     md = create_parser()
     tokens = md(md_text)
-    tokens = preprocess_mermaid(tokens, base_dir, theme=theme)
+    tokens = preprocess_mermaid(
+        tokens, base_dir, theme=theme, transparent_bg=transparent_bg
+    )
     tokens = preprocess_alerts(tokens)
     tokens = preprocess_images(tokens)
     anchor_map = build_heading_anchor_map(tokens)
@@ -788,12 +791,18 @@ def convert_file(
     help="Mermaid diagram theme.",
 )
 @click.option(
+    "--transparent",
+    is_flag=True,
+    default=False,
+    help="Use transparent background for Mermaid diagrams.",
+)
+@click.option(
     "--dry-run",
     is_flag=True,
     default=False,
     help="Parse and render without creating or updating pages.",
 )
-def main(files, page_id, parent_id, space_key, theme, dry_run):
+def main(files, page_id, parent_id, space_key, theme, transparent, dry_run):
     """Convert one or more Markdown files to Confluence pages."""
     if not page_id and not parent_id:
         raise click.UsageError("One of --page-id or --parent-id is required.")
@@ -810,6 +819,7 @@ def main(files, page_id, parent_id, space_key, theme, dry_run):
             parent_id=parent_id,
             space_key=space_key,
             theme=theme,
+            transparent_bg=transparent,
             dry_run=dry_run,
         )
         prefix = "Dry run" if dry_run else "Published"

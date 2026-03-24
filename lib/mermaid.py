@@ -11,7 +11,7 @@ TEMP_DIR = Path(tempfile.gettempdir()) / "markdown2docx"
 MERMAID_THEMES = ("default", "neutral", "dark", "forest")
 
 
-def preprocess_mermaid(tokens, base_dir, theme=None):
+def preprocess_mermaid(tokens, base_dir, theme=None, transparent_bg=False):
     """Scan AST for mermaid code blocks and replace with image paragraph tokens."""
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
     result = []
@@ -37,8 +37,6 @@ def preprocess_mermaid(tokens, base_dir, theme=None):
                     str(mmd_path),
                     "-o",
                     str(png_path),
-                    "-b",
-                    "transparent",
                     "-w",
                     "1024",
                     "-H",
@@ -46,6 +44,8 @@ def preprocess_mermaid(tokens, base_dir, theme=None):
                     "-s",
                     "2",
                 ]
+                if transparent_bg:
+                    cmd.extend(["-b", "transparent"])
                 if theme:
                     cmd.extend(["-t", theme])
                 subprocess.run(cmd, check=True)
