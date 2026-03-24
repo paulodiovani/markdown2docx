@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.3.24
+
+### Changed
+
+- Use opaque background for Mermaid diagrams by default
+- Add `--transparent` option to use transparent background for Mermaid diagrams
+
 ## 2026.3.20 (e036a09)
 
 ### Fixed
