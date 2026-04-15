@@ -14,6 +14,7 @@ from lib.parser import (
     create_parser,
     extract_text,
     preprocess_images,
+    preprocess_tables_in_lists,
     resolve_image_path,
 )
 
@@ -182,34 +183,110 @@ def render_alert(token, base_dir, **kw):
     return [{"type": "panel", "attrs": {"panelType": panel_type}, "content": content}]
 
 
+# ADF listItem only accepts a subset of block nodes as direct children.
+# Everything else (tables, panels, blockquotes, etc.) must be emitted at
+# document level — render_list splits the list around them.
+_ADF_LIST_ITEM_ALLOWED = {
+    "paragraph",
+    "codeBlock",
+    "mediaSingle",
+    "bulletList",
+    "orderedList",
+}
+
+
 def render_list(token, base_dir, **kw):
+    """Render a list to ADF, splitting around nodes ADF disallows in listItem.
+
+    When a list item contains a child that is not allowed inside an ADF
+    listItem (e.g. table, panel, blockquote), the list is split: items up
+    to and including the current one are emitted as one orderedList /
+    bulletList node, the disallowed block follows at document level, and
+    the remaining items resume in a new list segment. For ordered lists
+    the `attrs.order` of each segment continues the running item number,
+    so numbering appears continuous across the split.
+    """
     attrs = token.get("attrs", {}) or {}
     ordered = attrs.get("ordered", False)
     list_type = "orderedList" if ordered else "bulletList"
-    items = []
+
+    result_nodes = []
+    current_items = []
+    segment_start = 1
+    item_counter = 0
+
+    def flush_segment():
+        if not current_items:
+            return
+        node = {"type": list_type, "content": list(current_items)}
+        if ordered:
+            node["attrs"] = {"order": segment_start}
+        result_nodes.append(node)
+        current_items.clear()
+
     for item in token.get("children", []):
+        item_counter += 1
         item_children = item.get("children", [])
         is_task = item.get("type") == "task_list_item"
         checked = (
             item.get("attrs", {}).get("checked", False) if item.get("attrs") else False
         )
-        item_content = []
+
+        item_nestable = []
+        item_splits = []
+
         for j, child in enumerate(item_children):
             if child["type"] in ("paragraph", "block_text"):
-                inline = render_inline(child.get("children", []), base_dir, **kw)
+                inline_children = child.get("children", [])
+                # Image-only paragraph renders as a mediaSingle (ADF-allowed
+                # in listItem) rather than a paragraph wrapping it.
+                if (
+                    len(inline_children) == 1
+                    and inline_children[0].get("type") == "image"
+                ):
+                    rendered = render_paragraph(child, base_dir, **kw)
+                    for node in rendered:
+                        if node["type"] in _ADF_LIST_ITEM_ALLOWED:
+                            item_nestable.append(node)
+                        else:
+                            item_splits.append(node)
+                    continue
+
+                inline = render_inline(inline_children, base_dir, **kw)
                 if is_task and j == 0:
                     prefix = "\u2611 " if checked else "\u2610 "
                     inline = [_text(prefix)] + inline
-                item_content.append({"type": "paragraph", "content": inline})
+                item_nestable.append({"type": "paragraph", "content": inline})
             elif child["type"] == "list":
-                item_content.extend(render_list(child, base_dir, **kw))
+                # Nested list stays inside this listItem. If the nested list
+                # itself splits, we conservatively keep only its list nodes
+                # here and promote disallowed blocks out to document level.
+                nested = render_list(child, base_dir, **kw)
+                for node in nested:
+                    if node["type"] in _ADF_LIST_ITEM_ALLOWED:
+                        item_nestable.append(node)
+                    else:
+                        item_splits.append(node)
             else:
-                item_content.extend(render_block(child, base_dir, **kw))
-        items.append({"type": "listItem", "content": item_content})
-    node = {"type": list_type, "content": items}
-    if ordered:
-        node["attrs"] = {"order": 1}
-    return [node]
+                rendered = render_block(child, base_dir, **kw)
+                for node in rendered:
+                    if node["type"] in _ADF_LIST_ITEM_ALLOWED:
+                        item_nestable.append(node)
+                    else:
+                        item_splits.append(node)
+
+        if item_nestable:
+            current_items.append({"type": "listItem", "content": item_nestable})
+
+        if item_splits:
+            # Flush what we have so far, emit the disallowed blocks at
+            # document level, and resume numbering at the next item.
+            flush_segment()
+            result_nodes.extend(item_splits)
+            segment_start = item_counter + 1
+
+    flush_segment()
+    return result_nodes
 
 
 def render_table(token, base_dir, **kw):
@@ -708,6 +785,7 @@ def convert_file(
     tokens = preprocess_mermaid(
         tokens, base_dir, theme=theme, transparent_bg=transparent_bg
     )
+    tokens = preprocess_tables_in_lists(tokens)
     tokens = preprocess_alerts(tokens)
     tokens = preprocess_images(tokens)
     anchor_map = build_heading_anchor_map(tokens)

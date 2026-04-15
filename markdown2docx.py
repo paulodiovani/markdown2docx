@@ -32,6 +32,7 @@ from lib.parser import (
     extract_text,
     heading_slug,
     preprocess_images,
+    preprocess_tables_in_lists,
     resolve_image_path,
 )
 
@@ -367,7 +368,14 @@ def render_alert(doc, token, base_dir):
 
 
 def render_list(doc, token, base_dir):
-    """Render ordered, unordered, and task lists."""
+    """Render ordered, unordered, and task lists.
+
+    Block children of a list item (tables, code blocks, alerts, image-only
+    paragraphs, etc.) render at document level between the surrounding list
+    paragraphs. Because every list paragraph shares the same numId through
+    its style (``List Number`` / ``List Bullet``), Word continues the
+    ordered-list numbering across the intervening blocks.
+    """
     attrs = token.get("attrs", {}) or {}
     ordered = attrs.get("ordered", False)
     children = token.get("children", [])
@@ -386,13 +394,27 @@ def render_list(doc, token, base_dir):
 
         for j, child in enumerate(item_children):
             if child["type"] in ("paragraph", "block_text"):
+                inline_children = child.get("children", [])
+                # An image-only paragraph inside a list item renders as a
+                # document-level picture rather than an empty numbered item.
+                if (
+                    len(inline_children) == 1
+                    and inline_children[0].get("type") == "image"
+                ):
+                    src = inline_children[0].get("attrs", {}).get("src", "")
+                    if src:
+                        add_image(doc, src, base_dir)
+                    continue
+
                 para = doc.add_paragraph(style=style)
                 if is_task and j == 0:
                     checkbox = "\u2611 " if checked else "\u2610 "
                     para.add_run(checkbox)
-                render_inline(para, child.get("children", []), base_dir)
+                render_inline(para, inline_children, base_dir)
             elif child["type"] == "list":
                 render_list(doc, child, base_dir)
+            elif child["type"] == "blank_line":
+                continue
             else:
                 render_block(doc, child, base_dir)
 
@@ -585,10 +607,14 @@ def convert_file(input_path, output_dir, theme=None, transparent_bg=False):
         tokens, base_dir, theme=theme, transparent_bg=transparent_bg
     )
 
+    # Re-parse tables that mistune lost inside list items
+    tokens = preprocess_tables_in_lists(tokens)
+
     # Preprocess GitHub-style alerts
     tokens = preprocess_alerts(tokens)
 
-    # Normalize image attrs (url -> src)
+    # Normalize image attrs (url -> src) -- runs last so it covers the
+    # paragraphs emitted by preprocess_mermaid and any re-parsed tables.
     tokens = preprocess_images(tokens)
 
     # Create document and render

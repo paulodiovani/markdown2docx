@@ -1,5 +1,7 @@
 """GitHub-style alert detection and preprocessing."""
 
+from lib.parser import walk_block_containers
+
 # Alert type -> (border_color, background_color, label_text, text_color)
 ALERT_STYLES = {
     "NOTE": ("4493F8", "DBEAFE", "Note", "4493F8"),
@@ -49,49 +51,56 @@ def detect_alert_type(token):
 
 
 def preprocess_alerts(tokens):
-    """Scan AST for GitHub-style alerts in blockquotes and replace with alert tokens."""
-    result = []
+    """Scan AST (including inside list items and nested blockquotes) for
+    GitHub-style alerts in blockquotes and replace them with alert tokens.
+    """
 
-    for token in tokens:
-        if token["type"] == "block_quote":
-            alert_type = detect_alert_type(token)
-            if alert_type:
-                children = token.get("children", [])
+    def visit(token_list):
+        result = []
+        for token in token_list:
+            if token.get("type") == "block_quote":
+                alert_type = detect_alert_type(token)
+                if alert_type:
+                    children = token.get("children", [])
 
-                # Strip the [!TYPE] marker from the first paragraph's inlines
-                if children and children[0].get("type") == "paragraph":
-                    first_para = children[0]
-                    inlines = first_para.get("children", [])
+                    # Strip the [!TYPE] marker from the first paragraph's inlines
+                    if children and children[0].get("type") == "paragraph":
+                        first_para = children[0]
+                        inlines = first_para.get("children", [])
 
-                    # Remove the "[" and "!TYPE]" text nodes (first two inlines)
-                    stripped = inlines[2:]
+                        # Remove the "[" and "!TYPE]" text nodes (first two inlines)
+                        stripped = inlines[2:]
 
-                    # Remove leading softbreak if present
-                    if stripped and stripped[0].get("type") == "softbreak":
-                        stripped = stripped[1:]
+                        # Remove leading softbreak if present
+                        if stripped and stripped[0].get("type") == "softbreak":
+                            stripped = stripped[1:]
 
-                    if stripped:
-                        # Keep the first paragraph with remaining inlines
-                        body_children = [
-                            {"type": "paragraph", "children": stripped}
-                        ] + [c for c in children[1:] if c.get("type") != "blank_line"]
+                        if stripped:
+                            # Keep the first paragraph with remaining inlines
+                            body_children = [
+                                {"type": "paragraph", "children": stripped}
+                            ] + [
+                                c for c in children[1:] if c.get("type") != "blank_line"
+                            ]
+                        else:
+                            # First paragraph had only the marker; use
+                            # remaining children.
+                            body_children = [
+                                c for c in children[1:] if c.get("type") != "blank_line"
+                            ]
                     else:
-                        # First paragraph had only the marker; use remaining children
-                        body_children = [
-                            c for c in children[1:] if c.get("type") != "blank_line"
-                        ]
-                else:
-                    body_children = children
+                        body_children = children
 
-                result.append(
-                    {
-                        "type": "alert",
-                        "attrs": {"alert_type": alert_type},
-                        "children": body_children,
-                    }
-                )
-                continue
+                    result.append(
+                        {
+                            "type": "alert",
+                            "attrs": {"alert_type": alert_type},
+                            "children": body_children,
+                        }
+                    )
+                    continue
 
-        result.append(token)
+            result.append(token)
+        return result
 
-    return result
+    return walk_block_containers(tokens, visit)
