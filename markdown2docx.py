@@ -120,6 +120,139 @@ def set_paragraph_shading(paragraph, color_hex):
     p_pr.append(shd)
 
 
+# ---------------------------------------------------------------------------
+# List numbering (independent counter per Markdown list)
+# ---------------------------------------------------------------------------
+#
+# Word continues numbering across every paragraph sharing a numId. The
+# built-in ``List Number`` / ``List Bullet`` styles carry a style-level
+# numId, so using them for every list merges them into one continuous list
+# across the whole document. We bypass the styles entirely and build our
+# own abstractNum + num per Markdown list, giving each its own counter.
+#
+# Within one list we apply the same numId to every paragraph — so ordered
+# numbering continues across any non-list paragraphs (tables, code blocks,
+# images, etc.) emitted between items. Across separate lists we allocate
+# fresh numIds so each one restarts at 1.
+
+
+def _create_list_numbering(doc, ordered):
+    """Create a fresh abstractNum and num instance for one Markdown list.
+
+    Returns the new numId, or None if the document has no numbering part.
+    """
+    try:
+        numbering = doc.part.numbering_part.element
+    except (AttributeError, KeyError):
+        return None
+
+    # Allocate fresh abstractNumId (max existing + 1)
+    existing_abstract = [
+        int(a.get(qn("w:abstractNumId")))
+        for a in numbering.findall(qn("w:abstractNum"))
+        if a.get(qn("w:abstractNumId")) is not None
+    ]
+    new_abstract_id = (max(existing_abstract) + 1) if existing_abstract else 0
+
+    abstract = OxmlElement("w:abstractNum")
+    abstract.set(qn("w:abstractNumId"), str(new_abstract_id))
+    multi = OxmlElement("w:multiLevelType")
+    multi.set(qn("w:val"), "singleLevel")
+    abstract.append(multi)
+
+    lvl = OxmlElement("w:lvl")
+    lvl.set(qn("w:ilvl"), "0")
+
+    start = OxmlElement("w:start")
+    start.set(qn("w:val"), "1")
+    lvl.append(start)
+
+    fmt = OxmlElement("w:numFmt")
+    fmt.set(qn("w:val"), "decimal" if ordered else "bullet")
+    lvl.append(fmt)
+
+    lvl_text = OxmlElement("w:lvlText")
+    lvl_text.set(qn("w:val"), "%1." if ordered else "\u2022")
+    lvl.append(lvl_text)
+
+    lvl_jc = OxmlElement("w:lvlJc")
+    lvl_jc.set(qn("w:val"), "left")
+    lvl.append(lvl_jc)
+
+    pPr = OxmlElement("w:pPr")
+    ind = OxmlElement("w:ind")
+    ind.set(qn("w:left"), "720")
+    ind.set(qn("w:hanging"), "360")
+    pPr.append(ind)
+    lvl.append(pPr)
+
+    if not ordered:
+        rPr = OxmlElement("w:rPr")
+        r_fonts = OxmlElement("w:rFonts")
+        r_fonts.set(qn("w:ascii"), "Symbol")
+        r_fonts.set(qn("w:hAnsi"), "Symbol")
+        r_fonts.set(qn("w:hint"), "default")
+        rPr.append(r_fonts)
+        lvl.append(rPr)
+
+    abstract.append(lvl)
+
+    # Allocate fresh numId (max existing + 1) and point at the new abstract
+    existing_nums = [
+        int(n.get(qn("w:numId")))
+        for n in numbering.findall(qn("w:num"))
+        if n.get(qn("w:numId")) is not None
+    ]
+    new_num_id = (max(existing_nums) + 1) if existing_nums else 1
+
+    num = OxmlElement("w:num")
+    num.set(qn("w:numId"), str(new_num_id))
+    abst_ref = OxmlElement("w:abstractNumId")
+    abst_ref.set(qn("w:val"), str(new_abstract_id))
+    num.append(abst_ref)
+
+    # <w:abstractNum> elements must precede <w:num> elements in the schema.
+    # Insert the new abstractNum before the first <w:num> (if any), and the
+    # new <w:num> at the end of the numbering part.
+    first_num = numbering.find(qn("w:num"))
+    if first_num is not None:
+        first_num.addprevious(abstract)
+    else:
+        numbering.append(abstract)
+    numbering.append(num)
+
+    return new_num_id
+
+
+def _apply_list_numbering(paragraph, num_id, level=0):
+    """Apply list numbering (numPr) to a paragraph via direct formatting.
+
+    The paragraph keeps the default Normal style, so no style-level numId
+    competes with this direct override. Indentation is carried by the
+    abstractNum's level definition.
+    """
+    if num_id is None:
+        return
+    p_pr = paragraph._p.get_or_add_pPr()
+    for existing in p_pr.findall(qn("w:numPr")):
+        p_pr.remove(existing)
+    num_pr = OxmlElement("w:numPr")
+    ilvl = OxmlElement("w:ilvl")
+    ilvl.set(qn("w:val"), str(level))
+    num = OxmlElement("w:numId")
+    num.set(qn("w:val"), str(num_id))
+    num_pr.append(ilvl)
+    num_pr.append(num)
+    # Insert numPr near the start of pPr (per CT_PPr schema order: after
+    # pStyle, before most other children) so renderers that care about
+    # element order still pick it up.
+    pstyle = p_pr.find(qn("w:pStyle"))
+    if pstyle is not None:
+        pstyle.addnext(num_pr)
+    else:
+        p_pr.insert(0, num_pr)
+
+
 def add_hyperlink(paragraph, url, text):
     """Add a clickable hyperlink to a paragraph via XML manipulation."""
     part = paragraph.part
@@ -370,21 +503,22 @@ def render_alert(doc, token, base_dir):
 def render_list(doc, token, base_dir):
     """Render ordered, unordered, and task lists.
 
-    Block children of a list item (tables, code blocks, alerts, image-only
-    paragraphs, etc.) render at document level between the surrounding list
-    paragraphs. Because every list paragraph shares the same numId through
-    its style (``List Number`` / ``List Bullet``), Word continues the
-    ordered-list numbering across the intervening blocks.
+    Each invocation allocates a fresh numId via ``_create_list_numbering`` so
+    separate Markdown lists don't share a counter (the built-in ``List Number``
+    / ``List Bullet`` styles merge every list in the document into one
+    continuous counter — we bypass them). Every paragraph within one list gets
+    that numId via direct formatting, so ordered numbering continues across
+    any block children (tables, code blocks, alerts, image-only paragraphs,
+    nested lists) emitted between items.
     """
     attrs = token.get("attrs", {}) or {}
     ordered = attrs.get("ordered", False)
     children = token.get("children", [])
 
-    for i, item in enumerate(children):
-        item_children = item.get("children", [])
+    num_id = _create_list_numbering(doc, ordered)
 
-        # Determine style
-        style = "List Number" if ordered else "List Bullet"
+    for item in children:
+        item_children = item.get("children", [])
 
         # Check for task list item (type is task_list_item)
         is_task = item.get("type") == "task_list_item"
@@ -406,7 +540,8 @@ def render_list(doc, token, base_dir):
                         add_image(doc, src, base_dir)
                     continue
 
-                para = doc.add_paragraph(style=style)
+                para = doc.add_paragraph()
+                _apply_list_numbering(para, num_id)
                 if is_task and j == 0:
                     checkbox = "\u2611 " if checked else "\u2610 "
                     para.add_run(checkbox)
