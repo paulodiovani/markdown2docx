@@ -22,12 +22,15 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -r requirements-dev.txt
-      - run: pytest tests/ -v --cov --cov-report=xml --cov-report=term
-      - uses: actions/upload-artifact@v4
+      - run: pytest tests/ -v --cov --cov-report=term
+      - name: Write coverage report to workflow summary
         if: always()
-        with:
-          name: coverage-report
-          path: coverage.xml
+        run: |
+          {
+            echo "## Coverage report"
+            echo ""
+            coverage report --format=markdown
+          } >> "$GITHUB_STEP_SUMMARY"
 
   smoke-test:
     runs-on: ubuntu-latest
