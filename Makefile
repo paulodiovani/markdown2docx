@@ -50,7 +50,7 @@ format:
 	$(PYTHON) -m ruff format .
 
 test: .venv
-	$(PYTHON) -m pytest tests/ -v --cov=lib --cov=markdown2docx --cov=markdown2confluence --cov-report=term-missing
+	$(PYTHON) -m pytest tests/ -v --cov --cov-report=term
 
 test-unit: .venv
 	$(PYTHON) -m pytest tests/unit -v

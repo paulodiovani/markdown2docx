@@ -1,0 +1,6 @@
+[tool.coverage.run]
+branch = true
+source = ["lib", "markdown2docx", "markdown2confluence"]
+
+[tool.coverage.report]
+show_missing = true
