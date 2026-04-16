@@ -1,5 +1,7 @@
 """Unit tests for markdown2confluence.py (ADF renderers + comment re-anchoring)."""
 
+import json
+
 import markdown2confluence as m2c
 from markdown2confluence import (
     _ALERT_TO_PANEL,
@@ -904,6 +906,140 @@ def test_reapply_comment_marks_no_annotations_returns_new_adf_unchanged():
     }
     result = reapply_comment_marks(new_adf, old_adf, comments=[])
     assert result is new_adf
+
+
+def test_reapply_comment_marks_warns_on_already_dangling_comment(capsys):
+    """An API comment whose UUID isn't in old ADF should be flagged as dangling."""
+    old_adf = {"type": "doc", "content": []}
+    new_adf = {
+        "type": "doc",
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [{"type": "text", "text": "some body"}],
+            }
+        ],
+    }
+    comments = [
+        {
+            "properties": {
+                "inlineMarkerRef": "U-DANGLING",
+                "inlineOriginalSelection": "ghost text",
+            },
+            "body": {
+                "atlas_doc_format": {
+                    "value": json.dumps(
+                        {
+                            "type": "doc",
+                            "content": [
+                                {
+                                    "type": "paragraph",
+                                    "content": [
+                                        {"type": "text", "text": "body of comment"}
+                                    ],
+                                }
+                            ],
+                        }
+                    )
+                }
+            },
+        }
+    ]
+    reapply_comment_marks(new_adf, old_adf, comments=comments)
+    err = capsys.readouterr().err
+    assert "already" in err and "dangling" in err
+    assert "body of comment" in err
+
+
+def test_reapply_comment_marks_warns_when_text_not_found(capsys):
+    """Comment whose selection isn't found in new ADF triggers a warning."""
+    old_adf = {
+        "type": "doc",
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "VANISHED_STRING",
+                        "marks": [
+                            {
+                                "type": "annotation",
+                                "attrs": {
+                                    "id": "U-GONE",
+                                    "annotationType": "inlineComment",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    new_adf = {
+        "type": "doc",
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [{"type": "text", "text": "completely different text"}],
+            }
+        ],
+    }
+    comments = [
+        {
+            "properties": {
+                "inlineMarkerRef": "U-GONE",
+                "inlineOriginalSelection": "VANISHED_STRING",
+            },
+            "body": {
+                "atlas_doc_format": {
+                    "value": json.dumps({"type": "doc", "content": []})
+                }
+            },
+        }
+    ]
+    reapply_comment_marks(new_adf, old_adf, comments=comments)
+    err = capsys.readouterr().err
+    assert "could not be" in err
+    assert "VANISHED_STRING" in err
+
+
+def test_reapply_comment_marks_skips_anchored_with_no_selection():
+    """Annotation in old ADF with empty text is skipped without error."""
+    old_adf = {
+        "type": "doc",
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "",
+                        "marks": [
+                            {
+                                "type": "annotation",
+                                "attrs": {
+                                    "id": "U-EMPTY",
+                                    "annotationType": "inlineComment",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    new_adf = {
+        "type": "doc",
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [{"type": "text", "text": "hello"}],
+            }
+        ],
+    }
+    result = reapply_comment_marks(new_adf, old_adf, comments=[])
+    assert result is not None
 
 
 def test_reapply_comment_marks_handles_shifted_block_position():

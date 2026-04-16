@@ -750,6 +750,140 @@ def test_render_inline_nested_strong_in_emphasis(make_doc, tmp_path):
     assert para.runs[0].italic is True
 
 
+def test_render_list_image_only_item_emits_picture(make_doc, tmp_path, small_jpeg):
+    """An image-only list item renders as a doc-level picture (no empty para)."""
+    doc = make_doc()
+    token = {
+        "type": "list",
+        "attrs": {"ordered": False},
+        "children": [
+            {
+                "type": "list_item",
+                "children": [
+                    {
+                        "type": "block_text",
+                        "children": [
+                            {"type": "image", "attrs": {"src": small_jpeg.name}}
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    before_pics = len(doc.element.body.findall(".//" + qn("w:drawing")))
+    render_list(doc, token, str(small_jpeg.parent))
+    after_pics = len(doc.element.body.findall(".//" + qn("w:drawing")))
+    assert after_pics > before_pics
+
+
+def test_render_list_skips_blank_line_child(make_doc, tmp_path):
+    """A ``blank_line`` among a list item's children is skipped silently."""
+    doc = make_doc()
+    token = {
+        "type": "list",
+        "attrs": {"ordered": False},
+        "children": [
+            {
+                "type": "list_item",
+                "children": [
+                    {"type": "block_text", "children": [{"type": "text", "raw": "a"}]},
+                    {"type": "blank_line"},
+                ],
+            }
+        ],
+    }
+    before = len(doc.paragraphs)
+    render_list(doc, token, str(tmp_path))
+    # Still only one paragraph for the item text (blank_line doesn't add one).
+    assert len(doc.paragraphs) - before == 1
+
+
+def test_render_list_nested_block_falls_through_to_render_block(make_doc, tmp_path):
+    """Non-paragraph, non-list children of a list item route to render_block."""
+    doc = make_doc()
+    token = {
+        "type": "list",
+        "attrs": {"ordered": False},
+        "children": [
+            {
+                "type": "list_item",
+                "children": [
+                    {"type": "block_text", "children": [{"type": "text", "raw": "x"}]},
+                    {
+                        "type": "block_code",
+                        "raw": "code",
+                        "attrs": {"info": "python"},
+                    },
+                ],
+            }
+        ],
+    }
+    render_list(doc, token, str(tmp_path))
+    # At least one paragraph has the code-block shading.
+    fills = [_find_shd_fill(p) for p in doc.paragraphs]
+    assert any(f == "F2F2F2" for f in fills if f)
+
+
+def test_render_block_quote_with_nested_code_block(make_doc, tmp_path):
+    """Blockquote child that isn't a paragraph routes to render_block."""
+    doc = make_doc()
+    token = {
+        "type": "block_quote",
+        "children": [{"type": "block_code", "raw": "x", "attrs": {"info": "python"}}],
+    }
+    render_block_quote(doc, token, str(tmp_path))
+    fills = [_find_shd_fill(p) for p in doc.paragraphs if _find_shd_fill(p)]
+    assert "F2F2F2" in fills
+
+
+def test_render_alert_with_nested_code_block(make_doc, tmp_path):
+    """Alert body with a non-paragraph child routes through render_block."""
+    doc = make_doc()
+    token = {
+        "type": "alert",
+        "attrs": {"alert_type": "NOTE"},
+        "children": [{"type": "block_code", "raw": "c", "attrs": {"info": "python"}}],
+    }
+    render_alert(doc, token, str(tmp_path))
+    # Label paragraph + code-block paragraph both exist.
+    assert any(_find_shd_fill(p) == "F2F2F2" for p in doc.paragraphs)
+
+
+def test_render_inline_image_with_empty_src_is_noop(make_doc, tmp_path):
+    """An image inline token with no src is skipped without error."""
+    doc = make_doc()
+    para = doc.add_paragraph()
+    render_inline(para, [{"type": "image", "attrs": {"src": ""}}], str(tmp_path))
+    assert para.runs == []
+
+
+def test_create_list_numbering_returns_none_when_numbering_part_missing(monkeypatch):
+    """_create_list_numbering gracefully returns None on AttributeError."""
+    from markdown2docx import _create_list_numbering
+
+    class _FakePart:
+        @property
+        def numbering_part(self):
+            raise AttributeError("no numbering part")
+
+    class _FakeDoc:
+        part = _FakePart()
+
+    assert _create_list_numbering(_FakeDoc(), ordered=True) is None
+
+
+def test_apply_list_numbering_noop_when_num_id_none(make_doc):
+    """_apply_list_numbering with num_id=None returns without changing pPr."""
+    from markdown2docx import _apply_list_numbering
+
+    doc = make_doc()
+    para = doc.add_paragraph()
+    _apply_list_numbering(para, None)
+    p_pr = para._p.find(qn("w:pPr"))
+    # Either no pPr or pPr without numPr.
+    assert p_pr is None or p_pr.find(qn("w:numPr")) is None
+
+
 # ---------------------------------------------------------------------------
 # convert_file (thin integration — verifies orchestrator wiring)
 # ---------------------------------------------------------------------------
