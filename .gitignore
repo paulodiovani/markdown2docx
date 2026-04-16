@@ -25,6 +25,13 @@ ENV/
 .DS_Store
 Thumbs.db
 
+# Test artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
 # Project
 output/
 markdown2confluence.toml
