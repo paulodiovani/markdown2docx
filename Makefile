@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := build
-.PHONY: clean install uninstall lint format
+.PHONY: clean install uninstall lint format test test-unit test-e2e
 
 # Use the existing venv
 PIP = .venv/bin/pip
@@ -9,16 +9,24 @@ DOCX_OUTPUT = markdown2docx
 CONFLUENCE_OUTPUT = markdown2confluence
 PREFIX = $(HOME)/.local
 
+# Packages that live in the dev venv but must never be bundled by PyInstaller.
+PYINSTALLER_EXCLUDES = \
+	--exclude-module pytest \
+	--exclude-module _pytest \
+	--exclude-module responses \
+	--exclude-module ruff \
+	--exclude-module coverage
+
 .venv:
 	@echo "Setting up virtual environment..."
 	python3 -m venv .venv
-	$(PIP) install -r requirements.txt
+	$(PIP) install -r requirements-dev.txt
 
 build: .venv
 	@echo "Building standalone executables..."
 	$(PIP) install pyinstaller pyinstaller-hooks-contrib --upgrade
-	$(PYTHON) -m PyInstaller --onefile --name $(DOCX_OUTPUT) $(DOCX_OUTPUT).py
-	$(PYTHON) -m PyInstaller --onefile --name $(CONFLUENCE_OUTPUT) $(CONFLUENCE_OUTPUT).py
+	$(PYTHON) -m PyInstaller --onefile --name $(DOCX_OUTPUT) $(PYINSTALLER_EXCLUDES) $(DOCX_OUTPUT).py
+	$(PYTHON) -m PyInstaller --onefile --name $(CONFLUENCE_OUTPUT) $(PYINSTALLER_EXCLUDES) $(CONFLUENCE_OUTPUT).py
 
 clean:
 	rm -rf build dist *.spec
@@ -36,6 +44,16 @@ uninstall:
 
 lint:
 	$(PYTHON) -m ruff check .
+	$(PYTHON) -m ruff format --check .
 
 format:
 	$(PYTHON) -m ruff format .
+
+test: .venv
+	$(PYTHON) -m pytest tests/ -v --cov=lib --cov=markdown2docx --cov=markdown2confluence --cov-report=term-missing
+
+test-unit: .venv
+	$(PYTHON) -m pytest tests/unit -v
+
+test-e2e: .venv
+	$(PYTHON) -m pytest tests/e2e -v
