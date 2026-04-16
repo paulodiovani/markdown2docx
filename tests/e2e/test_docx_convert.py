@@ -164,14 +164,14 @@ def test_convert_alerts_md_applies_shading_per_type(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_convert_full_md_creates_bookmarks(tmp_path):
+def test_convert_full_md_creates_bookmarks(tmp_path, no_mermaid):
     result = m2d.convert_file(str(EXAMPLES / "full.md"), tmp_path)
     doc = Document(str(result))
     bms = doc.element.body.findall(".//" + qn("w:bookmarkStart"))
     assert len(bms) >= 6  # at least one per heading in full.md
 
 
-def test_convert_full_md_embeds_image(tmp_path):
+def test_convert_full_md_embeds_image(tmp_path, no_mermaid):
     result = m2d.convert_file(str(EXAMPLES / "full.md"), tmp_path)
     doc = Document(str(result))
     drawings = doc.element.body.findall(".//" + qn("w:drawing"))
