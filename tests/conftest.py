@@ -43,9 +43,13 @@ def mock_confluence_config(monkeypatch):
 
 @pytest.fixture
 def small_jpeg(tmp_path):
-    """Write a minimal valid JPEG to ``tmp_path`` and return its path."""
-    from PIL import Image
+    """Copy ``examples/cat.jpg`` into ``tmp_path`` and return its path.
 
-    path = tmp_path / "small.jpg"
-    Image.new("RGB", (10, 10), color=(200, 50, 50)).save(path, format="JPEG")
-    return path
+    Uses a real JPEG from the repo so tests don't need Pillow as a dev dep.
+    """
+    import shutil
+
+    src = Path(__file__).resolve().parent.parent / "examples" / "cat.jpg"
+    dest = tmp_path / "small.jpg"
+    shutil.copy(src, dest)
+    return dest
