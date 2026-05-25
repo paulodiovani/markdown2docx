@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.5.25 (41dd075)
+
+### Fixed
+
+- Fix DOCX render of lists (and other block children) inside blockquotes — quote styling is now applied to every paragraph emitted by the blockquote, not only direct paragraphs
+
 ## 2026.3.24 (a511e63)
 
 ### Changed
