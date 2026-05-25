@@ -431,31 +431,46 @@ def render_block_code(doc, token):
             run.italic = italic
 
 
+def _apply_block_quote_formatting(para):
+    """Apply gray left border (and indent for non-list paragraphs) to a paragraph."""
+    p_pr = para._p.get_or_add_pPr()
+
+    # List paragraphs carry their own indent via the abstractNum level
+    # definition; overriding it would break bullet/number placement. Indent
+    # only paragraphs that aren't list items.
+    if p_pr.find(qn("w:numPr")) is None:
+        para.paragraph_format.left_indent = Inches(0.5)
+
+    # Don't stack borders if one is already present (e.g. nested blockquote).
+    if p_pr.find(qn("w:pBdr")) is None:
+        p_bdr = OxmlElement("w:pBdr")
+        left_bdr = OxmlElement("w:left")
+        left_bdr.set(qn("w:val"), "single")
+        left_bdr.set(qn("w:sz"), "12")
+        left_bdr.set(qn("w:space"), "4")
+        left_bdr.set(qn("w:color"), "999999")
+        p_bdr.append(left_bdr)
+        p_pr.append(p_bdr)
+
+
 def render_block_quote(doc, token, base_dir):
-    """Render a blockquote with left indentation and gray left border."""
+    """Render a blockquote with left indentation and gray left border.
+
+    Applies the quote styling to every paragraph emitted by children, so
+    nested lists, code blocks, etc. also visually belong to the quote.
+    """
     children = token.get("children", [])
     for child in children:
+        before = len(doc.paragraphs)
         if child["type"] == "paragraph":
             para = doc.add_paragraph()
-
-            # Add left indentation
-            p_fmt = para.paragraph_format
-            p_fmt.left_indent = Inches(0.5)
-
-            # Add gray left border via XML
-            p_pr = para._p.get_or_add_pPr()
-            p_bdr = OxmlElement("w:pBdr")
-            left_bdr = OxmlElement("w:left")
-            left_bdr.set(qn("w:val"), "single")
-            left_bdr.set(qn("w:sz"), "12")
-            left_bdr.set(qn("w:space"), "4")
-            left_bdr.set(qn("w:color"), "999999")
-            p_bdr.append(left_bdr)
-            p_pr.append(p_bdr)
-
             render_inline(para, child.get("children", []), base_dir)
+        elif child["type"] == "blank_line":
+            continue
         else:
             render_block(doc, child, base_dir)
+        for para in doc.paragraphs[before:]:
+            _apply_block_quote_formatting(para)
 
 
 def render_alert(doc, token, base_dir):
